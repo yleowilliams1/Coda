@@ -14,33 +14,68 @@ Gild requires the following:
 - For none MSVC/MinGW we do "_USE_MINGW_ANSI_STDIO=1" for printf(%zu)
 # CLI
 
-Coda includes a cli for prototype generation. It doesn't work on Windows as it cli.c uses posix funcitons. It's mostly written by gemini, I barely touched it so when it breaks it's not my fault. Heres the api.
+Coda includes a cli for prototype generation. It doesn't work on Windows as it cli.c uses posix funcitons. It's mostly written by gemini, I barely touched it so when it breaks it's not my fault, leave me alone. Heres the api.
 
 ## Commands
 
 | Command | Arguments | Description |
-| :--- | :--- | :--- |
-| `help` | *None* | Prints the list of available commands. |
-| `set` | `FIELD VALUE` | Sets a field, stat, or skill modifier on the active prototype. |
-| `write` | `NAME` | Serializes the active prototype to `NAME.proto` using `gild_io`. |
-| `reset` | *None* | Resets the prototype and frees any allocated strings (`name`, `dialogue_path`). |
-| `exit` / `quit` | *None* | Exits CLI mode. |
-| `open` | *None* | opens existing file |
-| `list` | *None* | list current |
----
+| ----- | ----- | ----- |
+| `help` | *None* | Show available commands and usage |
+| `exit` / `quit` | *None* | Exit the CLI |
+| `set` | `FIELD VALUE` (or subcommand args) | Set a field, flag, inventory slot, or hotbar slot on the prototype |
+| `write` | `NAME` | Write prototype to `assets/prototype/NAME.proto` |
+| `open` / `read` | `NAME` | Load prototype from `NAME.proto` (`assets/prototype/` or given path) |
+| `list` | *None* | Display current prototype fields, stats, skills, and non-empty slots |
+| `reset` | *None* | Reset the prototype to defaults |
 
-## Settable Fields (`set FIELD VALUE`)
+## Settable Fields & Subcommands
 
-Field names and enum values are **case-insensitive**.
+Field names, flag names, item names, and enum values are **case-insensitive**.
 
-### General Properties
+### General Properties (`set FIELD VALUE`)
 
 | Field | Alias | Type / Allowed Values | Example |
-| :--- | :--- | :--- | :--- |
+| ----- | ----- | ----- | ----- |
 | `name` | — | String | `set name ForestGoblin` |
 | `type` | — | `player`, `goblin`, `civilian` (or `*_ENTITY`) | `set type goblin` |
 | `level` | `starting_level` | `u32` (`>= 0`) | `set level 5` |
 | `dialogue` | `dialogue_path` | File path string | `set dialogue dialogues/goblin.dlg` |
+
+### Flags (`set flag` / `set flags`)
+
+* `set flag <FLAG> [1|0|on|off|true|false]` — Enable or disable a flag (defaults to enabling if omitted)
+* `set flag none` — Clear all flags (`ENTITY_FLAG_NONE`)
+
+Supported flags:
+* `dead` (`ENTITY_FLAG_DEAD`)
+* `static` (`ENTITY_FLAG_STATIC`)
+* `no_combat` (`ENTITY_FLAG_NO_COMBAT`)
+* `hostile` (`ENTITY_FLAG_HOSTILE`)
+* `dialogue` (`ENTITY_FLAG_DIALOGUE`)
+
+```text
+> set flag hostile
+> set flag ENTITY_FLAG_HOSTILE 0
+> set flag none
+```
+
+### Inventory & Hotbar (`set inventory` / `set inv` / `set hotbar`)
+
+* `set inventory <SLOT 0..31> <ITEM|none> [COUNT]` — Set or clear an inventory slot (`COUNT` defaults to `1`)
+* `set hotbar <SLOT 0..7> <ITEM|none> [COUNT]` — Set or clear a hotbar slot (`COUNT` defaults to `1`)
+
+Supported items (`ITEM_LIST`):
+* `apple` (`ITEM_APPLE`)
+* `dagger` (`ITEM_DAGGER`)
+* `butchers_knife` (`ITEM_BUTCHERS_KNIFE`)
+* `leather_jacket` (`ITEM_LEATHER_JACKET`)
+* `power_armor` (`ITEM_POWER_ARMOR`)
+
+```text
+> set inventory 0 dagger 2
+> set hotbar 1 ITEM_APPLE 5
+> set hotbar 1 none
+```
 
 ### Base Stats (`s16`)
 
@@ -85,3 +120,4 @@ Accepts bare names or `SK_` prefixed names:
 > set sneak 15
 > set SK_MELEE 8
 ```
+

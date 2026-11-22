@@ -8,15 +8,19 @@
 	X(GOBLIN)\
 	X(CIVILIAN)
 
-enum EntityFlags {
-	ENTITY_FLAG_NONE      = 0u,
-	ENTITY_FLAG_DEAD      = 1u << 0,
-	ENTITY_FLAG_STATIC    = 1u << 1,
-	ENTITY_FLAG_NO_COMBAT = 1u << 2,
-	ENTITY_FLAG_HOSTILE   = 1u << 3,
-	ENTITY_FLAG_DIALOGUE  = 1u << 4,
-};
+#define ENTITY_FLAG_LIST\
+	X(DEAD,      1u << 0)\
+	X(STATIC,    1u << 1)\
+	X(NO_COMBAT, 1u << 2)\
+	X(HOSTILE,   1u << 3)\
+	X(DIALOGUE,  1u << 4)
 
+enum EntityFlags {
+	ENTITY_FLAG_NONE = 0u,
+	#define X(name, bit) ENTITY_FLAG_##name = (bit),
+	ENTITY_FLAG_LIST
+	#undef X
+};
 enum EntityType {
 	#define X(name) name##_ENTITY,
 	ENTITY_TYPE_LIST

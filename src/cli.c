@@ -18,7 +18,153 @@
 
 struct EntityPrototype prototype;
 char *name;
+static bool parse_bool_flag(const char *str, bool *out) {
+	if (!str) return false;
+	if (strcasecmp(str, "1") == 0 || strcasecmp(str, "true") == 0 ||
+	    strcasecmp(str, "on") == 0 || strcasecmp(str, "set") == 0) {
+		*out = true;
+		return true;
+	}
+	if (strcasecmp(str, "0") == 0 || strcasecmp(str, "false") == 0 ||
+	    strcasecmp(str, "off") == 0 || strcasecmp(str, "clear") == 0) {
+		*out = false;
+		return true;
+	}
+	return false;
+}
 
+static bool entity_flag_matches(const char *input, const char *base_name) {
+	char full_name[128];
+	int n = snprintf(full_name, sizeof(full_name), "ENTITY_FLAG_%s", base_name);
+	if (n < 0 || n >= (int)sizeof(full_name)) {
+		return false;
+	}
+	return strcasecmp(input, base_name) == 0 || strcasecmp(input, full_name) == 0;
+}
+
+// Usage:
+//   set flag <FLAG> [1|0|on|off|true|false]   (defaults to enabling if omitted)
+//   set flag none                             (clears all flags)
+static void set_prototype_flag(int argc, char *argv[]) {
+	if (argc < 3 || argc > 4) {
+		printf("Invalid arguments for set flag, requires FLAG [1|0|on|off]\n");
+		return;
+	}
+
+	const char *flag_arg = argv[2];
+	if (strcasecmp(flag_arg, "none") == 0 || strcasecmp(flag_arg, "ENTITY_FLAG_NONE") == 0) {
+		prototype.flags = ENTITY_FLAG_NONE;
+		printf("Cleared all entity flags\n");
+		return;
+	}
+
+	bool enable = true;
+	if (argc == 4 && !parse_bool_flag(argv[3], &enable)) {
+		printf("Invalid flag state '%s' (expected 1/0, on/off, true/false)\n", argv[3]);
+		return;
+	}
+
+	#define X(fname, bit) \
+		if (entity_flag_matches(flag_arg, #fname)) { \
+			if (enable) { \
+				prototype.flags = (u8)(prototype.flags | ENTITY_FLAG_##fname); \
+			} else { \
+				prototype.flags = (u8)(prototype.flags & ~ENTITY_FLAG_##fname); \
+			} \
+			printf("%s ENTITY_FLAG_%s (flags = 0x%02X)\n", \
+				enable ? "Set" : "Cleared", #fname, (unsigned)prototype.flags); \
+			return; \
+		}
+	ENTITY_FLAG_LIST
+	#undef X
+
+	printf("Unknown entity flag '%s'\n", flag_arg);
+}
+
+static bool item_type_matches(const char *input, const char *base_name) {
+	char full_name[128];
+	int n = snprintf(full_name, sizeof(full_name), "ITEM_%s", base_name);
+	if (n < 0 || n >= (int)sizeof(full_name)) {
+		return false;
+	}
+	return strcasecmp(input, base_name) == 0 || strcasecmp(input, full_name) == 0;
+}
+
+static bool parse_item_type(const char *input, enum ItemType *out_type) {
+	#define X(iname) \
+		if (item_type_matches(input, #iname)) { \
+			*out_type = ITEM_##iname; \
+			return true; \
+		}
+	ITEM_LIST
+	#undef X
+	return false;
+}
+
+static bool parse_u32(const char *str, u32 *out) {
+	if (!str || *str == '\0' || str[0] == '-') return false;
+	errno = 0;
+	char *end = NULL;
+	unsigned long val = strtoul(str, &end, 10);
+	if (errno != 0 || end == str || *end != '\0' || val > 0xFFFFFFFFUL) return false;
+	*out = (u32)val;
+	return true;
+}
+// Usage:
+//   set inventory <SLOT 0..31> <ITEM|none> [COUNT]
+//   set hotbar    <SLOT 0..7>  <ITEM|none> [COUNT]
+static void set_prototype_container_slot(bool is_hotbar, int argc, char *argv[]) {
+	const char *area = is_hotbar ? "hotbar" : "inventory";
+	u32 max_slots = is_hotbar ? HOTBAR_SIZE : INVENTORY_SIZE;
+	struct ItemStack *slots = is_hotbar
+		? prototype.starting_inventory.hotbar_items
+		: prototype.starting_inventory.items;
+
+	if (argc < 4 || argc > 5) {
+		printf("Invalid arguments for set %s, requires SLOT ITEM [COUNT]\n", area);
+		return;
+	}
+
+	u32 slot = 0;
+	if (!parse_u32(argv[2], &slot) || slot >= max_slots) {
+		printf("Invalid %s slot '%s' (must be 0..%u)\n", area, argv[2], max_slots - 1u);
+		return;
+	}
+
+	if (strcasecmp(argv[3], "none") == 0 || strcasecmp(argv[3], "clear") == 0 || strcasecmp(argv[3], "empty") == 0) {
+		slots[slot].id = 0;
+		slots[slot].count = 0;
+		slots[slot].active = false;
+		printf("Cleared %s slot [%u]\n", area, slot);
+		return;
+	}
+
+	enum ItemType item;
+	if (!parse_item_type(argv[3], &item)) {
+		printf("Unknown item '%s'\n", argv[3]);
+		return;
+	}
+
+	u32 count = 1;
+	if (argc == 5) {
+		if (!parse_u32(argv[4], &count) || count == 0) {
+			printf("Invalid item count '%s' (must be >= 1)\n", argv[4]);
+			return;
+		}
+	}
+
+	slots[slot].id = (u32)item;
+	slots[slot].count = count;
+	slots[slot].active = true;
+
+	printf("Set %s slot [%u] = ITEM_%s (id=%u, count=%u)\n",
+		area, slot,
+		#define X(iname) (item == ITEM_##iname) ? #iname :
+		ITEM_LIST
+		#undef X
+		"UNKNOWN",
+		slots[slot].id, slots[slot].count);
+}
 // Helper to case-insensitively match a field name like "strength" or "ST_STRENGTH"
 static const char *entity_type_to_name(enum EntityType t) {
 	switch (t) {
@@ -94,15 +240,6 @@ static bool parse_s16(const char *str, s16 *out) {
 	return true;
 }
 
-static bool parse_u32(const char *str, u32 *out) {
-	if (!str || *str == '\0' || str[0] == '-') return false;
-	errno = 0;
-	char *end = NULL;
-	unsigned long val = strtoul(str, &end, 10);
-	if (errno != 0 || end == str || *end != '\0' || val > 0xFFFFFFFFUL) return false;
-	*out = (u32)val;
-	return true;
-}
 
 static void reset_prototype(void) {
 	memset(&prototype, 0, sizeof(prototype));
@@ -283,19 +420,37 @@ static void write_prototype_file(const char *base_name) {
 
 static void handle_command(int argc, char *argv[]) {
 	if (argc <= 0 || !argv[0]) return;
-
 	if (strcmp(argv[0], "help") == 0) {
 		printf(
 			"Available Commands:\n"
 			"  help: show this message\n"
 			"  exit/quit: exit program\n"
 			"  set FIELD VALUE: set a field on prototype (name, type, level, dialogue, stats, skills)\n"
+			"  set flag FLAG [1|0|on|off|true|false]|none: toggle or clear entity flags\n"
+			"  set inventory SLOT ITEM|none [COUNT]: set or clear inventory slot (0..31)\n"
+			"  set hotbar SLOT ITEM|none [COUNT]: set or clear hotbar slot (0..7)\n"
 			"  write NAME: write prototype to assets/prototype/NAME.proto\n"
 			"  open/read NAME: load prototype from NAME.proto\n"
 			"  list: display current prototype fields\n"
 			"  reset: clears the prototype\n"
 		);
 	} else if (strcmp(argv[0], "set") == 0) {
+		if (argc < 2) {
+			printf("Invalid arguments for set, requires FIELD VALUE\n");
+			return;
+		}
+		if (strcasecmp(argv[1], "flag") == 0 || strcasecmp(argv[1], "flags") == 0) {
+			set_prototype_flag(argc, argv);
+			return;
+		}
+		if (strcasecmp(argv[1], "inventory") == 0 || strcasecmp(argv[1], "inv") == 0) {
+			set_prototype_container_slot(false, argc, argv);
+			return;
+		}
+		if (strcasecmp(argv[1], "hotbar") == 0) {
+			set_prototype_container_slot(true, argc, argv);
+			return;
+		}
 		if (argc != 3) {
 			printf("Invalid arguments for set, requires FIELD VALUE\n");
 			return;
