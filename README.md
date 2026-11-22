@@ -32,6 +32,7 @@ Coda includes a cli for prototype generation. It doesn't work on Windows as it c
 
 Field names, flag names, item names, and enum values are **case-insensitive**.
 
+You can set collision by doing set collision x y w h and set dialogue with set dialogue path
 ### General Properties (`set FIELD VALUE`)
 
 | Field | Alias | Type / Allowed Values | Example |

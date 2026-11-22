@@ -240,8 +240,8 @@ static bool parse_s16(const char *str, s16 *out) {
 	return true;
 }
 
-
 static void reset_prototype(void) {
+	free((void *)prototype.dialogue_path);
 	memset(&prototype, 0, sizeof(prototype));
 	free(name);
 	name = NULL;
@@ -294,10 +294,20 @@ static void set_prototype_field(const char *field, const char *value) {
 		printf("Set starting_level = %u\n", prototype.starting_level);
 		return;
 	}
-
 	if (strcasecmp(field, "dialogue") == 0 || strcasecmp(field, "dialogue_path") == 0) {
-		// Note: if you allocate dialogue_path dynamically, track/free it in reset_prototype()
-		prototype.dialogue_path = strdup(value);
+		if (strcasecmp(value, "none") == 0 || strcasecmp(value, "clear") == 0) {
+			free((void *)prototype.dialogue_path);
+			prototype.dialogue_path = NULL;
+			printf("Cleared dialogue_path\n");
+			return;
+		}
+		char *copy = strdup(value);
+		if (!copy) {
+			printf("Out of memory setting dialogue_path\n");
+			return;
+		}
+		free((void *)prototype.dialogue_path);
+		prototype.dialogue_path = copy;
 		printf("Set dialogue_path = %s\n", prototype.dialogue_path);
 		return;
 	}
@@ -334,7 +344,51 @@ static void set_prototype_field(const char *field, const char *value) {
 
 	printf("Unknown prototype field '%s'\n", field);
 }
+static void set_prototype_collision(int argc, char *argv[]) {
+	if (argc == 6) {
+		u32 x, y, w, h;
+		if (!parse_u32(argv[2], &x) ||
+		    !parse_u32(argv[3], &y) ||
+		    !parse_u32(argv[4], &w) ||
+		    !parse_u32(argv[5], &h)) {
+			printf("Invalid collision values (expected 4 non-negative integers: X Y W H)\n");
+			return;
+		}
+		prototype.collision.x = x;
+		prototype.collision.y = y;
+		prototype.collision.w = w;
+		prototype.collision.h = h;
+		printf("Set collision = x:%u, y:%u, w:%u, h:%u\n", x, y, w, h);
+		return;
+	}
 
+	if (argc == 4) {
+		u32 val;
+		if (!parse_u32(argv[3], &val)) {
+			printf("Invalid collision value '%s'\n", argv[3]);
+			return;
+		}
+		if (strcasecmp(argv[2], "x") == 0) {
+			prototype.collision.x = val;
+		} else if (strcasecmp(argv[2], "y") == 0) {
+			prototype.collision.y = val;
+		} else if (strcasecmp(argv[2], "w") == 0 || strcasecmp(argv[2], "width") == 0) {
+			prototype.collision.w = val;
+		} else if (strcasecmp(argv[2], "h") == 0 || strcasecmp(argv[2], "height") == 0) {
+			prototype.collision.h = val;
+		} else {
+			printf("Unknown collision field '%s' (expected x, y, w, or h)\n", argv[2]);
+			return;
+		}
+		printf("Set collision.%s = %u (x:%u, y:%u, w:%u, h:%u)\n",
+			argv[2], val,
+			prototype.collision.x, prototype.collision.y,
+			prototype.collision.w, prototype.collision.h);
+		return;
+	}
+
+	printf("Invalid arguments for set collision, requires 'X Y W H' or 'x|y|w|h VALUE'\n");
+}
 #define PROTO_MAGIC   "GILDPRTO"
 #define PROTO_VERSION 1u
 
@@ -449,6 +503,10 @@ static void handle_command(int argc, char *argv[]) {
 		}
 		if (strcasecmp(argv[1], "hotbar") == 0) {
 			set_prototype_container_slot(true, argc, argv);
+			return;
+		}
+		if (strcasecmp(argv[1], "collision") == 0 || strcasecmp(argv[1], "col") == 0) {
+			set_prototype_collision(argc, argv);
 			return;
 		}
 		if (argc != 3) {
