@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 project(coda VERSION 0.1.0 LANGUAGES C)
-
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "../")
 # Options
 option(FETCH_RAYLIB "Download and build raylib if not installed" OFF)
 set(RAYLIB_DIR "" CACHE PATH "Path to local raylib install (containing lib/cmake/raylib)")

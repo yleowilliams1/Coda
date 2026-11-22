@@ -14,9 +14,63 @@
 #define MAX_LINE 1024
 #define MAX_ARGS 64
 
+// My vibe coded masterpiece
+
 struct EntityPrototype prototype;
 char *name;
+
 // Helper to case-insensitively match a field name like "strength" or "ST_STRENGTH"
+static const char *entity_type_to_name(enum EntityType t) {
+	switch (t) {
+		#define X(ename) case ename##_ENTITY: return #ename "_ENTITY";
+		ENTITY_TYPE_LIST
+		#undef X
+		default: return "UNKNOWN";
+	}
+}
+
+static void list_prototype(void) {
+	printf("=== EntityPrototype ===\n");
+	printf("  name:           %s\n", (name && name[0]) ? name : "(none)");
+	printf("  type:           %s (%d)\n", entity_type_to_name(prototype.type), (int)prototype.type);
+	printf("  starting_level: %u\n", prototype.starting_level);
+	printf("  flags:          0x%02X\n", (unsigned)prototype.flags);
+	printf("  dialogue_path:  %s\n", (prototype.dialogue_path && prototype.dialogue_path[0]) ? prototype.dialogue_path : "(none)");
+	printf("  collision:      x=%u, y=%u, w=%u, h=%u\n",
+		prototype.collision.x, prototype.collision.y,
+		prototype.collision.w, prototype.collision.h);
+
+	printf("  -- Base Stats --\n");
+	#define X(stat_name) \
+		printf("    %-14s = %d\n", #stat_name, (int)prototype.stats.base_stats[ST_##stat_name]);
+	STATS_LIST
+	#undef X
+
+	printf("  -- Skill Mods --\n");
+	#define X(skill_name) \
+		printf("    %-14s = %d\n", #skill_name, (int)prototype.stats.skill_mod[SK_##skill_name]);
+	SKILLS_LIST
+	#undef X
+
+	printf("  -- Hotbar (active / non-zero) --\n");
+	for (int i = 0; i < HOTBAR_SIZE; i++) {
+		const struct ItemStack *s = &prototype.starting_inventory.hotbar_items[i];
+		if (s->active || s->id != 0 || s->count != 0) {
+			printf("    [%d] id=%u, count=%u, active=%s\n",
+				i, s->id, s->count, s->active ? "true" : "false");
+		}
+	}
+
+	printf("  -- Inventory (active / non-zero) --\n");
+	for (int i = 0; i < INVENTORY_SIZE; i++) {
+		const struct ItemStack *s = &prototype.starting_inventory.items[i];
+		if (s->active || s->id != 0 || s->count != 0) {
+			printf("    [%d] id=%u, count=%u, active=%s\n",
+				i, s->id, s->count, s->active ? "true" : "false");
+		}
+	}
+}
+
 static bool field_matches(const char *input, const char *enum_name, const char *prefix) {
 	size_t plen = strlen(prefix);
 	const char *bare = input;
@@ -57,6 +111,7 @@ static void reset_prototype(void) {
 	prototype.type = CIVILIAN_ENTITY;
 	prototype.starting_level = 1;
 }
+
 static bool entity_type_matches(const char *value, const char *base_name) {
 	char full_enum[128];
 	int n = snprintf(full_enum, sizeof(full_enum), "%s_ENTITY", base_name);
@@ -65,47 +120,48 @@ static bool entity_type_matches(const char *value, const char *base_name) {
 	}
 	return strcasecmp(value, base_name) == 0 || strcasecmp(value, full_enum) == 0;
 }
+
 static void set_prototype_field(const char *field, const char *value) {
 	if (strcasecmp(field, "name") == 0) {
 		char *copy = strdup(value);
 		if (!copy) {
-			GILD_LOG(GILD_INFO, "Out of memory setting name");
+			printf("Out of memory setting name\n");
 			return;
 		}
 		free(name);
 		name = copy;
-		GILD_LOG(GILD_INFO, "Set name = %s", name);
+		printf("Set name = %s\n", name);
 		return;
 	}
 	if (strcasecmp(field, "type") == 0) {
 		#define X(tname) \
 			if (entity_type_matches(value, #tname)) { \
 				prototype.type = tname##_ENTITY; \
-				GILD_LOG(GILD_INFO, "Set type = %s", #tname "_ENTITY"); \
+				printf("Set type = %s\n", #tname "_ENTITY"); \
 				return; \
 			}
 		ENTITY_TYPE_LIST
 		#undef X
 
-		GILD_LOG(GILD_INFO, "Unknown entity type '%s'", value);
+		printf("Unknown entity type '%s'\n", value);
 		return;
 	}
 
 	if (strcasecmp(field, "level") == 0 || strcasecmp(field, "starting_level") == 0) {
 		u32 lvl;
 		if (!parse_u32(value, &lvl)) {
-			GILD_LOG(GILD_INFO, "Invalid level value '%s'", value);
+			printf("Invalid level value '%s'\n", value);
 			return;
 		}
 		prototype.starting_level = lvl;
-		GILD_LOG(GILD_INFO, "Set starting_level = %u", prototype.starting_level);
+		printf("Set starting_level = %u\n", prototype.starting_level);
 		return;
 	}
 
 	if (strcasecmp(field, "dialogue") == 0 || strcasecmp(field, "dialogue_path") == 0) {
 		// Note: if you allocate dialogue_path dynamically, track/free it in reset_prototype()
 		prototype.dialogue_path = strdup(value);
-		GILD_LOG(GILD_INFO, "Set dialogue_path = %s", prototype.dialogue_path);
+		printf("Set dialogue_path = %s\n", prototype.dialogue_path);
 		return;
 	}
 
@@ -114,11 +170,11 @@ static void set_prototype_field(const char *field, const char *value) {
 		if (field_matches(field, #stat_name, "ST_")) { \
 			s16 v; \
 			if (!parse_s16(value, &v)) { \
-				GILD_LOG(GILD_INFO, "Invalid integer for stat '%s': %s", field, value); \
+				printf("Invalid integer for stat '%s': %s\n", field, value); \
 				return; \
 			} \
 			prototype.stats.base_stats[ST_##stat_name] = v; \
-			GILD_LOG(GILD_INFO, "Set base stat %s = %d", #stat_name, v); \
+			printf("Set base stat %s = %d\n", #stat_name, v); \
 			return; \
 		}
 	STATS_LIST
@@ -129,17 +185,17 @@ static void set_prototype_field(const char *field, const char *value) {
 		if (field_matches(field, #skill_name, "SK_")) { \
 			s16 v; \
 			if (!parse_s16(value, &v)) { \
-				GILD_LOG(GILD_INFO, "Invalid integer for skill '%s': %s", field, value); \
+				printf("Invalid integer for skill '%s': %s\n", field, value); \
 				return; \
 			} \
 			prototype.stats.skill_mod[SK_##skill_name] = v; \
-			GILD_LOG(GILD_INFO, "Set skill mod %s = %d", #skill_name, v); \
+			printf("Set skill mod %s = %d\n", #skill_name, v); \
 			return; \
 		}
 	SKILLS_LIST
 	#undef X
 
-	GILD_LOG(GILD_INFO, "Unknown prototype field '%s'", field);
+	printf("Unknown prototype field '%s'\n", field);
 }
 
 #define PROTO_MAGIC   "GILDPRTO"
@@ -169,7 +225,7 @@ static void write_prototype_file(const char *base_name) {
 	}
 
 	char filename[512];
-	int written = snprintf(filename, sizeof(filename), "%s.proto", base_name);
+	int written = snprintf(filename, sizeof(filename), "assets/prototype/%s.proto", base_name);
 	if (written < 0 || written >= (int)sizeof(filename)) {
 		GILD_LOG(GILD_INVALID_FORMAT, "Prototype path too long: %s.proto", base_name);
 		return;
@@ -224,51 +280,71 @@ static void write_prototype_file(const char *base_name) {
 
 	GILD_LOG(GILD_INFO, "Wrote prototype to '%s'", filename);
 }
+
 static void handle_command(int argc, char *argv[]) {
 	if (argc <= 0 || !argv[0]) return;
 
 	if (strcmp(argv[0], "help") == 0) {
-		GILD_LOG(GILD_INFO,
+		printf(
 			"Available Commands:\n"
 			"  help: show this message\n"
 			"  exit/quit: exit program\n"
 			"  set FIELD VALUE: set a field on prototype (name, type, level, dialogue, stats, skills)\n"
-			"  write NAME: write prototype to NAME.proto\n"
-			"  reset: clears the prototype"
+			"  write NAME: write prototype to assets/prototype/NAME.proto\n"
+			"  open/read NAME: load prototype from NAME.proto\n"
+			"  list: display current prototype fields\n"
+			"  reset: clears the prototype\n"
 		);
 	} else if (strcmp(argv[0], "set") == 0) {
 		if (argc != 3) {
-			GILD_LOG(GILD_INFO, "Invalid arguments for set, requires FIELD VALUE");
+			printf("Invalid arguments for set, requires FIELD VALUE\n");
 			return;
 		}
 		set_prototype_field(argv[1], argv[2]);
 	} else if (strcmp(argv[0], "write") == 0) {
 		if (argc != 2) {
-			GILD_LOG(GILD_INFO, "Invalid arguments for write, requires NAME");
+			printf("Invalid arguments for write, requires NAME\n");
 			return;
 		}
 		write_prototype_file(argv[1]);
 	} else if (strcmp(argv[0], "reset") == 0) {
 		reset_prototype();
-		GILD_LOG(GILD_INFO, "Prototype reset");
+		printf("Prototype reset\n");
+	} else if (strcmp(argv[0], "open") == 0 || strcmp(argv[0], "read") == 0) {
+		if (argc != 2) {
+			printf("Invalid arguments for %s, requires NAME\n", argv[0]);
+			return;
+		}
+		struct EntityPrototype *loaded = open_prototype_file(argv[1], PROTO_MAGIC, PROTO_VERSION);
+		if (loaded) {
+			free((void *)prototype.dialogue_path);
+			prototype = *loaded;
+			free(loaded);
+		}
+	} else if (strcmp(argv[0], "list") == 0) {
+		if (argc != 1) {
+			printf("Invalid arguments for list\n");
+			return;
+		}
+		list_prototype();
 	} else {
-		GILD_LOG(GILD_INFO, "Unknown command: %s. Type help for help", argv[0]);
+		printf("Unknown command: %s. Type help for help\n", argv[0]);
 	}
 }
 
 bool run_cli(){
-	GILD_LOG(GILD_INFO, "Entering CLI mode. Type 'help' or 'exit' to quit");
-	
+	printf("Entering CLI mode. Type 'help' or 'exit' to quit\n");
+
 	char line[MAX_LINE];
 
 	while(1){
 		printf("> ");
 		fflush(stdout);
-		
+
 		if(fgets(line, sizeof(line), stdin) == NULL){printf("\n");return false;}
 
 		line[strcspn(line, "\r\n")] = '\0';
-		
+
 		char *argv[MAX_ARGS];
 		int argc = 0;
 		char *token = strtok(line, " \t");

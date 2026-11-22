@@ -2,6 +2,7 @@
 #include "util/gild_math.h"
 #include "stats.h"
 #include "inventory.h"
+
 #define ENTITY_TYPE_LIST\
 	X(PLAYER)\
 	X(GOBLIN)\
@@ -41,3 +42,5 @@ struct EntitySaveable {
 	u32 actual_level;
 	u8 actual_flags;
 };
+
+struct EntityPrototype *open_prototype_file(const char *arg, const char mag[8], u32 ver);

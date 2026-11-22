@@ -14,7 +14,7 @@ Gild requires the following:
 - For none MSVC/MinGW we do "_USE_MINGW_ANSI_STDIO=1" for printf(%zu)
 # CLI
 
-Coda includes a cli for prototype generation. It doesn't work on Windows as it cli.c uses posix funcitons. Heres the api
+Coda includes a cli for prototype generation. It doesn't work on Windows as it cli.c uses posix funcitons. It's mostly written by gemini, I barely touched it so when it breaks it's not my fault. Heres the api.
 
 ## Commands
 
@@ -25,7 +25,8 @@ Coda includes a cli for prototype generation. It doesn't work on Windows as it c
 | `write` | `NAME` | Serializes the active prototype to `NAME.proto` using `gild_io`. |
 | `reset` | *None* | Resets the prototype and frees any allocated strings (`name`, `dialogue_path`). |
 | `exit` / `quit` | *None* | Exits CLI mode. |
-
+| `open` | *None* | opens existing file |
+| `list` | *None* | list current |
 ---
 
 ## Settable Fields (`set FIELD VALUE`)
