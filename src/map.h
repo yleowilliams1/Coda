@@ -2,22 +2,42 @@
 #include "util/gild_math.h"
 #include "util/gild_basic.h"
 
-struct MapEntity{
-	const char *path_to_dialogue; 
-	const char *path_to_entity;
-	const char *path_to_stats;
-	const char *path_to_inventory;
+#define DL 10
+#define DR 11
+#define UR 12
+#define UL 13
+
+enum EntityType{
+	PLAYER,
+	NPC,
+	DOOR,
+	LOOT,
+	PROP,
 };
 
+struct MapEntity{
+	const char *prototype;
+	enum EntityType type;
+	u32 uid;
+	gild_v2_u32 pos;
+	u8 sprite;
+
+};
+struct MapCeiling {
+	u16 x, y, w, h;
+	u8 sprite;
+};
 struct Map{
 	struct MapEntity *entities;
 	u16 entity_count;
 	u16 w, h;
-	u8 *flags;
-	u8 *doors;
-	u8 *floor_sprite;
-	u8 *props;	
-	u8 *walls;
-	u8 *ceiling;
 
+	struct MapCeiling *ceilings;
+	u16 ceiling_count;
+	
+	u8 *flags;
+	u8 *floors;
+	
+	u8 player_state;
+	u32 player;
 };
