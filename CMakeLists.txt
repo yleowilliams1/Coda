@@ -42,7 +42,14 @@ set(GILD_SOURCES
 
 add_executable(app
 	${GILD_SOURCES}
+	src/cli.c
+	src/dialogue.c
+	src/entity.c
+	src/flag.c
+	src/inventory.c
 	src/main.c
+	src/map.c
+	src/stats.c
 )
 
 target_include_directories(app PRIVATE
