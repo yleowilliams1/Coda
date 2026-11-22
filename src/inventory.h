@@ -2,32 +2,49 @@
 
 #include "util/gild_basic.h"
 #include "stats.h"
-
+#include <stdbool.h>
 #define HOTBAR_SIZE 8
+#define INVENTORY_SIZE 32
+
+#define ITEM_LIST\
+	X(APPLE)\
+	X(DAGGER)\
+	X(BUTCHERS_KNIFE)\
+	X(LEATHER_JACKET)\
+	X(POWER_ARMOR)
+enum ItemType{
+	#define X(name) ITEM_##name,
+	ITEM_LIST
+	#undef X
+	ITEM_COUNT
+};
 struct InventoryBonusMatrix{
-	int stats[ST_STAT_COUNT];
-	int skills[SK_SKILL_COUNT];
-	int derived[DE_DERIVED_COUNT];
+	s8 stats[ST_STAT_COUNT];
+	s8 skills[SK_SKILL_COUNT];
+	s8 derived[DE_DERIVED_COUNT];
 };
 struct ItemPrototype{
-	int32_t uid;
-	int32_t value;
 	struct InventoryBonusMatrix matrix; 
-	int min_dmg;
-	int max_dmg;
+	u32 value;
+	u32 min_dmg;
+	u32 max_dmg;
 	enum SkillsEnum attack_skill_use;
-	int weight;
-	int name_str;
-	int description_str;
-	int max_stack;
+	u16 weight;
+	u16 heal_min;
+	u16 heal_max;
+	s16 AC;
+	char *name;
+	char *description;
 };
 struct ItemStack{
-	int32_t uid;
-	int32_t count;
+	u32 id;
+	u32 count;
+	bool active;
 };
-
 struct Inventory{
 	struct ItemStack hotbar_items[HOTBAR_SIZE];
-	int16_t item_stack_count;
-	struct ItemStack *item_stack;
+	struct ItemStack items[INVENTORY_SIZE]; 
 };
+
+void init_item_protos();
+struct ItemPrototype *get_item_proto(enum ItemType type);

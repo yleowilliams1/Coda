@@ -2,12 +2,15 @@
 #include "util/gild_basic.h"
 #include "util/gild_astar.h"
 #include "stats.h"
-// charactesr are moveable npcs. They can pathfind, have stats, and an inventory and thats it.
+#include "inventory.h"
 
 struct PathfindComponent{
 	struct Gild_AstarPath *path;
 };
 struct StatsComponent{
-	u32 stats_prototype_reference;
-	struct StatsSave stats_save;
+	enum StatProtoType type;
+	struct StatsSaveable stats;
+};
+struct InventoryComponent{
+	struct Inventory inventory;
 };

@@ -75,3 +75,6 @@ struct Parser{
 	s32 pos;
 	s32 count;
 };
+
+struct DialogueFile *load_dialogue(const char *path);
+
