@@ -389,8 +389,6 @@ static void set_prototype_collision(int argc, char *argv[]) {
 
 	printf("Invalid arguments for set collision, requires 'X Y W H' or 'x|y|w|h VALUE'\n");
 }
-#define PROTO_MAGIC   "GILDPRTO"
-#define PROTO_VERSION 1u
 
 static bool write_string_field(FILE *f, const char *str) {
 	u32 len = str ? (u32)strlen(str) : 0u;
@@ -428,7 +426,7 @@ static void write_prototype_file(const char *base_name) {
 	}
 
 	FILE *fp = gild_fopen(filename, "wb");
-	if (!fp) {
+	if(!fp){
 		GILD_LOG(GILD_NO_FILE, "Failed to open '%s' for writing", filename);
 		return;
 	}

@@ -253,6 +253,35 @@ bool gild_read_bytes(FILE *f, void *buf, size_t n) {
 	return (n == 0 || fread(buf, 1, n, f) == n) ? true : false;
 }
 
+bool gild_write_str(FILE *f, const char *s){
+	if(!f){return false;}
+	u64 len = s ? strlen(s) : 0;
+	if(len > UINT32_MAX){
+		GILD_LOG(GILD_INVALID_ARG, "String too long to write (%llu bytes)", (unsigned long long)len);
+		return false;
+	}
+	return gild_write_u32(f, (u32)len) && gild_write_bytes(f, s, (size_t)len);
+}
+
+bool gild_read_str(FILE *f, char **out, u32 max_len){
+	if(!f || !out){return false;}
+	u32 len;
+	if(!gild_read_u32(f, &len)){return false;}
+	if(len == 0){*out = NULL; return true;}
+	if(len > max_len){
+		GILD_LOG(GILD_CORRUPT, "Stored string length %u is over the limit of %u", len, max_len);
+		return false;
+	}
+	char *s = GILD_XMALLOC(gild_safe_add((size_t)len, (size_t)1));
+	if(!gild_read_bytes(f, s, len)){
+		free(s);
+		return false;
+	}
+	s[len] = '\0';
+	*out = s;
+	return true;
+}
+
 bool gild_write_u8(FILE *f, u8 v) {
 	if (!f) { return false; }
 	return fwrite(&v, 1, 1, f) == 1 ? true : false;

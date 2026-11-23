@@ -37,6 +37,14 @@ GILD_API bool gild_read_header(FILE *f, const char mag[8], u32 version);
 GILD_API bool gild_write_bytes(FILE *f, const void *buf, size_t n);
 GILD_API bool gild_read_bytes(FILE *f, void *buf, size_t n);
 
+// Strings: u32 byte length, then the bytes (no terminator).
+// NULL and "" are both written as length 0 and both read back as NULL.
+// gild_read_str mallocs the result (caller frees). It fails if the stored length
+// is over max_len, so a corrupt file can't ask for a huge allocation.
+// On failure *out is left untouched.
+GILD_API bool gild_write_str(FILE *f, const char *s);
+GILD_API bool gild_read_str(FILE *f, char **out, u32 max_len);
+
 // All multi-byte integers are stored little-endian regardless of the host.
 GILD_API bool gild_write_u8(FILE *f, u8 v);
 GILD_API bool gild_write_u16(FILE *f, u16 v);

@@ -30,25 +30,28 @@ if(NOT raylib_FOUND)
 endif()
 
 set(GILD_SOURCES
+	src/util/gild_astar.c
 	src/util/gild_basic.c
+	src/util/gild_io.c
 	src/util/gild_log.c
 	src/util/gild_mem.c
 	src/util/gild_math.c
-	src/util/gild_hash.c
-	src/util/gild_io.c
 	src/util/gild_string.c
 	src/util/gild_window.c
 )
 
 add_executable(app
 	${GILD_SOURCES}
+	src/camera.c
 	src/cli.c
 	src/dialogue.c
+	src/editor.c
 	src/entity.c
 	src/flag.c
 	src/inventory.c
 	src/main.c
 	src/map.c
+	src/save.c
 	src/stats.c
 )
 

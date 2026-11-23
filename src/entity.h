@@ -2,7 +2,8 @@
 #include "util/gild_math.h"
 #include "stats.h"
 #include "inventory.h"
-
+#define PROTO_MAGIC   "GILDPRTO"
+#define PROTO_VERSION 1u
 #define ENTITY_TYPE_LIST\
 	X(PLAYER)\
 	X(GOBLIN)\

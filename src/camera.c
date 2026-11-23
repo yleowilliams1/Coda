@@ -36,7 +36,7 @@ void update_cam(Camera2D *cam){
 		else{base_zoom /= factor;}
 
 		// Clamp
-		if(base_zoom < MIN){base_zoom = MAX;}
+		if(base_zoom < MIN){base_zoom = MIN;}
 		if(base_zoom > MAX){base_zoom = MAX;}
 
 		cam->zoom = base_zoom;

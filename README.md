@@ -12,6 +12,9 @@ Gild requires the following:
 - /utf-8 
 - fopen/sscanf/strerror are deprecated so we compile with '_CRT_SECURE_NO_WARNINGS'
 - For none MSVC/MinGW we do "_USE_MINGW_ANSI_STDIO=1" for printf(%zu)
+# Map Editor
+
+This is a map editor written by claude, thanks alot. It's not very interesting but I need to put it here. It does make maps for sure.
 # CLI
 
 Coda includes a cli for prototype generation. It doesn't work on Windows as it cli.c uses posix funcitons. It's mostly written by gemini, I barely touched it so when it breaks it's not my fault, leave me alone. Heres the api.
