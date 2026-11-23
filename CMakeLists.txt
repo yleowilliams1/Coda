@@ -48,6 +48,7 @@ add_executable(app
 	src/editor.c
 	src/entity.c
 	src/flag.c
+	src/game.c
 	src/inventory.c
 	src/main.c
 	src/map.c
