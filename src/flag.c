@@ -13,7 +13,7 @@ static u32 flag_hash(const char *name) {
 	u32 hash = 2166136261u;
 	while (*name) {
 		hash ^= (u8)*name++;
-		hash = gild_safe_mult(hash, 16777619u);
+		hash *= 16777619u;
 	}
 	return hash;
 }
@@ -30,7 +30,7 @@ static struct Flag *flag_find(struct FlagManager *fm, const char *name, u32 hash
 void flag_free(struct FlagManager *fm) {
 	if (!fm) { return; }
 	free(fm->flags);
-	free(fm);
+	*fm = (struct FlagManager){0};
 }
 
 void flag_set(struct FlagManager *fm, const char *name, bool value) {

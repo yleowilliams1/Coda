@@ -6,7 +6,7 @@
 
 // write_entity/read_entity use "<ENTITY_SAVE_DIR>/<uid>.ent".
 #ifndef ENTITY_SAVE_DIR
-#define ENTITY_SAVE_DIR "save/entities"
+#define ENTITY_SAVE_DIR "data/save/entities"
 #endif
 
 // Each of these is its own binary file: gild header (magic, timestamp, version),
@@ -23,7 +23,7 @@
 
 // Map tiles and ceilings. Entities live in their own file (write_map_entities);
 // by convention "maps/town.map" goes with "maps/town.ments", see map_entity_path.
-// read_map fills w, h, floors, flags, ceilings and ceiling_count, and leaves the
+// read_map fills w, h, floors, flags, ceilings and transitions, and leaves the
 // entities alone.
 bool write_map(const struct Map *m, const char *path);
 bool read_map(struct Map *out, const char *path);
@@ -34,6 +34,8 @@ char *map_entity_path(const char *map_path);
 
 bool write_entity(const struct EntitySaveable *s, u32 uid);
 bool read_entity(struct EntitySaveable *out, u32 uid);
+// Whether "<ENTITY_SAVE_DIR>/<uid>.ent" can be opened. Logs nothing, unlike read_entity.
+bool entity_save_exists(u32 uid);
 
 bool write_map_entities(const struct Map *m, const char *path);
 bool read_map_entities(struct Map *m, const char *path);   // fills m->entities and m->entity_count only
@@ -45,5 +47,5 @@ bool read_flags(struct FlagManager *out, const char *path);
 // Calling these on string literals will crash.
 void free_entity_saveable(struct EntitySaveable *s);
 void free_map_entities(struct Map *m);
-// Floors, flags, ceilings and entities.
+// Floors, flags, ceilings, transitions and entities.
 void free_map(struct Map *m);

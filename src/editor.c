@@ -16,9 +16,9 @@
 #include "util/raygui.h"
 
 // Controls
-//   1 2 3 4     tool: floor, flags, ceiling, entity
-//   LMB         paint floor / set collide / drag a ceiling / place entity
-//   RMB         floor back to 0 / clear collide / delete ceiling / delete entity
+//   1 2 3 4 5   tool: floor, flags, ceiling, entity, transition
+//   LMB         paint floor / set collide / drag a ceiling / place entity / drag a transition
+//   RMB         floor back to 0 / clear collide / delete ceiling / delete entity / delete transition
 //   Q / E       previous / next texture (skips ids with no file)
 //   H           hide ceilings
 //   Ctrl+S      save the .map and .ments
@@ -31,8 +31,10 @@
 #define MAP_PATH_MAX 512
 #define STATUS_SECONDS 4.0
 
-enum Tool { TOOL_FLOOR, TOOL_FLAG, TOOL_CEILING, TOOL_ENTITY, TOOL_COUNT };
-static const char *tool_names[TOOL_COUNT] = {"Floor", "Flags", "Ceiling", "Entity"};
+enum Tool { TOOL_FLOOR, TOOL_FLAG, TOOL_CEILING, TOOL_ENTITY, TOOL_TRANSITION, TOOL_COUNT };
+static const char *tool_names[TOOL_COUNT] = {"Floor", "Flags", "Ceiling", "Entity", "Transition"};
+// Which panel text box has keyboard focus.
+enum Focus { FOCUS_NONE, FOCUS_PROTO, FOCUS_UID, FOCUS_TPATH, FOCUS_TX, FOCUS_TY };
 static const char *type_names[PROP + 1] = {"PLAYER", "NPC", "DOOR", "LOOT", "PROP"};
 
 static Camera2D cam;
@@ -49,15 +51,21 @@ static s32 hover_tx, hover_ty;
 static bool hover_in;
 
 static bool dragging;
+static enum Tool drag_tool;
 static s32 drag_tx, drag_ty;
+
+static enum Focus focus;
 
 // Entity brush, set in the panel
 static char proto_buf[PROTO_MAX];
 static char uid_buf[UID_MAX];
-static bool edit_proto, edit_uid;
 static int ent_type = NPC;
 static bool ent_collide = true;
 static bool auto_uid;  // after placing, move the UID box to the next free uid
+
+// Transition brush, set in the panel
+static char tpath_buf[MAP_PATH_MAX];
+static char ttx_buf[UID_MAX], tty_buf[UID_MAX];
 
 static char status[160];
 static double status_time = -100.0;
@@ -109,6 +117,55 @@ static void delete_ceiling_at(s32 tx, s32 ty){
 		dirty = true;
 		return;
 	}
+}
+
+static bool parse_u32_text(const char *s, u32 *out){
+	char *end;
+	unsigned long v = strtoul(s, &end, 10);
+	if(s[0] == '\0' || s[0] == '-' || *end != '\0' || v > UINT32_MAX){return false;}
+	*out = (u32)v;
+	return true;
+}
+
+static void add_transition(s32 tx0, s32 ty0, s32 tx1, s32 ty1){
+	u32 dx, dy;
+	if(tpath_buf[0] == '\0'){set_status("Set the target map path first"); return;}
+	if(!parse_u32_text(ttx_buf, &dx) || !parse_u32_text(tty_buf, &dy)){set_status("Set the drop tile (two numbers) first"); return;}
+	if(m.transition_count == UINT16_MAX){set_status("Too many transitions"); return;}
+	s32 x0 = tx0 < tx1 ? tx0 : tx1, x1 = tx0 < tx1 ? tx1 : tx0;
+	s32 y0 = ty0 < ty1 ? ty0 : ty1, y1 = ty0 < ty1 ? ty1 : ty0;
+	m.transitions = GILD_XREALLOC(m.transitions, ((size_t)m.transition_count + 1) * sizeof(struct MapTransition));
+	struct MapTransition *t = &m.transitions[m.transition_count++];
+	t->x = (u16)x0;
+	t->y = (u16)y0;
+	t->w = (u16)(x1 - x0 + 1);
+	t->h = (u16)(y1 - y0 + 1);
+	t->path = gild_copy_alloc_str(tpath_buf, strlen(tpath_buf));
+	t->target.x = dx;
+	t->target.y = dy;
+	dirty = true;
+}
+
+static bool transition_covers(const struct MapTransition *t, s32 tx, s32 ty){
+	return tx >= t->x && ty >= t->y && tx < (s32)t->x + t->w && ty < (s32)t->y + t->h;
+}
+
+// Most recently added transition covering the tile, or -1.
+static int transition_at(s32 tx, s32 ty){
+	for(int i = (int)m.transition_count - 1; i >= 0; i--){
+		if(transition_covers(&m.transitions[i], tx, ty)){return i;}
+	}
+	return -1;
+}
+
+static void delete_transition_at(s32 tx, s32 ty){
+	int i = transition_at(tx, ty);
+	if(i < 0){return;}
+	free((void *)m.transitions[i].path);
+	memmove(&m.transitions[i], &m.transitions[i + 1], (size_t)(m.transition_count - i - 1) * sizeof(struct MapTransition));
+	m.transition_count--;
+	if(m.transition_count == 0){free(m.transitions); m.transitions = NULL;}
+	dirty = true;
 }
 
 static bool entity_on_tile(const struct MapEntity *e, s32 tx, s32 ty){
@@ -237,13 +294,12 @@ void update_editor(){
 	hover_in = map_world_to_tile(&m, world.x, world.y, &hover_tx, &hover_ty);
 
 	// While a text box has focus, keys are text, not shortcuts.
-	bool typing = edit_proto || edit_uid;
+	bool typing = focus != FOCUS_NONE;
 	// Clicking the map while a text box has focus ends the typing and still counts
 	// as a click (otherwise the first click after typing a UID only closes the box).
 	if(typing && mouse.x >= PANEL_W &&
 	   (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))){
-		edit_proto = false;
-		edit_uid = false;
+		focus = FOCUS_NONE;
 		typing = false;
 	}
 	if(!typing){
@@ -251,12 +307,13 @@ void update_editor(){
 		if(IsKeyPressed(KEY_TWO)){tool = TOOL_FLAG;}
 		if(IsKeyPressed(KEY_THREE)){tool = TOOL_CEILING;}
 		if(IsKeyPressed(KEY_FOUR)){tool = TOOL_ENTITY;}
+		if(IsKeyPressed(KEY_FIVE)){tool = TOOL_TRANSITION;}
 		if(IsKeyPressed(KEY_Q)){cycle_texture(-1);}
 		if(IsKeyPressed(KEY_E)){cycle_texture(1);}
 		if(IsKeyPressed(KEY_H)){hide_ceilings = !hide_ceilings;}
 		if((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_S)){save();}
 	}
-	if(tool != TOOL_CEILING){dragging = false;}
+	if(tool != drag_tool){dragging = false;}
 
 	// The panel and text boxes get the mouse first.
 	if(typing || mouse.x < PANEL_W){
@@ -280,17 +337,24 @@ void update_editor(){
 		else if(rmb && (m.flags[i] & MAP_FLAG_COLLIDE)){m.flags[i] &= (u8)~MAP_FLAG_COLLIDE; dirty = true;}
 		break;
 	case TOOL_CEILING:
+	case TOOL_TRANSITION:
+		// Both are rectangles dragged out with LMB.
 		if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && hover_in){
 			dragging = true;
+			drag_tool = tool;
 			drag_tx = hover_tx;
 			drag_ty = hover_ty;
 		}
 		if(dragging && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)){
 			dragging = false;
-			add_ceiling(drag_tx, drag_ty,
-			            clamp_s32(hover_tx, 0, (s32)m.w - 1), clamp_s32(hover_ty, 0, (s32)m.h - 1));
+			s32 ex = clamp_s32(hover_tx, 0, (s32)m.w - 1), ey = clamp_s32(hover_ty, 0, (s32)m.h - 1);
+			if(tool == TOOL_CEILING){add_ceiling(drag_tx, drag_ty, ex, ey);}
+			else {add_transition(drag_tx, drag_ty, ex, ey);}
 		}
-		if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && hover_in){delete_ceiling_at(hover_tx, hover_ty);}
+		if(IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && hover_in){
+			if(tool == TOOL_CEILING){delete_ceiling_at(hover_tx, hover_ty);}
+			else {delete_transition_at(hover_tx, hover_ty);}
+		}
 		break;
 	case TOOL_ENTITY:
 		if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && hover_in){add_entity(hover_tx, hover_ty);}
@@ -346,10 +410,16 @@ static void draw_overlays(void){
 			const struct MapCeiling *c = &m.ceilings[i];
 			outline_tiles(c->x, c->y, c->x + c->w - 1, c->y + c->h - 1, SKYBLUE);
 		}
-		if(dragging){
-			outline_tiles(drag_tx, drag_ty,
-			              clamp_s32(hover_tx, 0, (s32)m.w - 1), clamp_s32(hover_ty, 0, (s32)m.h - 1), YELLOW);
+	}
+	if(tool == TOOL_TRANSITION){
+		for(u16 i = 0; i < m.transition_count; i++){
+			const struct MapTransition *t = &m.transitions[i];
+			outline_tiles(t->x, t->y, t->x + t->w - 1, t->y + t->h - 1, MAGENTA);
 		}
+	}
+	if(dragging){
+		outline_tiles(drag_tx, drag_ty,
+		              clamp_s32(hover_tx, 0, (s32)m.w - 1), clamp_s32(hover_ty, 0, (s32)m.h - 1), YELLOW);
 	}
 	if(tool == TOOL_ENTITY){
 		// Entities whose texture is missing would otherwise be invisible.
@@ -360,6 +430,11 @@ static void draw_overlays(void){
 		}
 	}
 	if(hover_in){outline_tiles(hover_tx, hover_ty, hover_tx, hover_ty, WHITE);}
+}
+
+// A text box that takes focus when clicked and gives it up on Enter or a click elsewhere.
+static void text_box(Rectangle r, char *buf, int size, enum Focus id){
+	if(GuiTextBox(r, buf, size, focus == id)){focus = (focus == id) ? FOCUS_NONE : id;}
 }
 
 // raygui is immediate mode, so the panel's buttons are handled here as they are drawn.
@@ -377,7 +452,7 @@ static void draw_panel(void){
 		if(GuiButton(r, TextFormat("%d %s", t + 1, tool_names[t]))){tool = (enum Tool)t;}
 		if((int)tool == t){DrawRectangleLinesEx((Rectangle){r.x - 2, r.y - 2, r.width + 4, r.height + 4}, 2, ORANGE);}
 	}
-	y += 2 * ROW + 4;
+	y += ((TOOL_COUNT + 1) / 2) * ROW + 4;
 
 	if(GuiButton((Rectangle){x, y, 30, 22}, "<")){cycle_texture(-1);}
 	GuiLabel((Rectangle){x + 40, y, w - 80, 22}, TextFormat("Texture %d  (Q/E)", (int)tex_id));
@@ -391,17 +466,11 @@ static void draw_panel(void){
 	if(tool == TOOL_ENTITY){
 		GuiLabel((Rectangle){x, y, w, 20}, "Prototype");
 		y += 20;
-		if(GuiTextBox((Rectangle){x, y, w, 22}, proto_buf, PROTO_MAX, edit_proto)){
-			edit_proto = !edit_proto;
-			if(edit_proto){edit_uid = false;}
-		}
+		text_box((Rectangle){x, y, w, 22}, proto_buf, PROTO_MAX, FOCUS_PROTO);
 		y += ROW;
 		GuiLabel((Rectangle){x, y, w, 20}, uid_buf[0] ? "UID" : "UID  (needed to place)");
 		y += 20;
-		if(GuiTextBox((Rectangle){x, y, w, 22}, uid_buf, UID_MAX, edit_uid)){
-			edit_uid = !edit_uid;
-			if(edit_uid){edit_proto = false;}
-		}
+		text_box((Rectangle){x, y, w, 22}, uid_buf, UID_MAX, FOCUS_UID);
 		y += ROW;
 		if(GuiButton((Rectangle){x, y, w, 22}, TextFormat("Type: %s", type_names[ent_type]))){ent_type = (ent_type + 1) % (PROP + 1);}
 		y += ROW;
@@ -411,6 +480,28 @@ static void draw_panel(void){
 		y += ROW + 4;
 	}
 
+	if(tool == TOOL_TRANSITION){
+		GuiLabel((Rectangle){x, y, w, 20}, "Target map");
+		y += 20;
+		text_box((Rectangle){x, y, w, 22}, tpath_buf, MAP_PATH_MAX, FOCUS_TPATH);
+		y += ROW;
+		GuiLabel((Rectangle){x, y, w, 20}, "Drop at tile (x, y)");
+		y += 20;
+		text_box((Rectangle){x, y, half, 22}, ttx_buf, UID_MAX, FOCUS_TX);
+		text_box((Rectangle){x + half + 6, y, half, 22}, tty_buf, UID_MAX, FOCUS_TY);
+		y += ROW;
+		// What the transition under the cursor does.
+		int ti = hover_in ? transition_at(hover_tx, hover_ty) : -1;
+		if(ti >= 0){
+			const struct MapTransition *tr = &m.transitions[ti];
+			GuiLabel((Rectangle){x, y, w, 20}, TextFormat("-> %s", tr->path));
+			y += 18;
+			GuiLabel((Rectangle){x, y, w, 20}, TextFormat("   at %u, %u", tr->target.x, tr->target.y));
+			y += 18;
+		}
+		y += 4;
+	}
+
 	if(GuiButton((Rectangle){x, y, w, 22}, hide_ceilings ? "Ceilings: hidden (H)" : "Ceilings: shown (H)")){hide_ceilings = !hide_ceilings;}
 	y += ROW;
 	if(GuiButton((Rectangle){x, y, w, 22}, "Save (Ctrl+S)")){save();}
@@ -418,7 +509,8 @@ static void draw_panel(void){
 
 	GuiLabel((Rectangle){x, y, w, 20}, hover_in ? TextFormat("Tile %d, %d", hover_tx, hover_ty) : "Tile -");
 	y += 20;
-	GuiLabel((Rectangle){x, y, w, 20}, TextFormat("%u entities, %u ceilings", (u32)m.entity_count, (u32)m.ceiling_count));
+	GuiLabel((Rectangle){x, y, w, 20}, TextFormat("%u entities, %u ceilings, %u exits",
+	         (u32)m.entity_count, (u32)m.ceiling_count, (u32)m.transition_count));
 	y += ROW;
 	GuiLabel((Rectangle){x, y, w, 20}, "LMB place   RMB erase");
 	y += 18;

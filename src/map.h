@@ -54,6 +54,13 @@ struct MapCeiling {
 	u16 x, y, w, h;
 	u8 sprite;
 };
+// Rectangle in tile coordinates that sends the player to another map.
+// Data only: nothing in map.c acts on it.
+struct MapTransition {
+	u16 x, y, w, h;
+	const char *path;    // map to load (heap-owned, never NULL in a saved map)
+	gild_v2_u32 target;  // tile to drop the player on in that map
+};
 struct Map{
 	struct MapEntity *entities;
 	u16 entity_count;
@@ -61,6 +68,9 @@ struct Map{
 
 	struct MapCeiling *ceilings;
 	u16 ceiling_count;
+
+	struct MapTransition *transitions;
+	u16 transition_count;
 
 	u8 *flags;
 	u8 *floors;

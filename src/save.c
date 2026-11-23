@@ -21,6 +21,8 @@
 //                             str prototype_path, u32 tpos.x, u32 tpos.y, u32 actual_level, u8 actual_flags
 //   Map ("MAPFILE_")          u16 w, u16 h, u8 floors[w*h], u8 flags[w*h],
 //                             u16 ceiling count, then per ceiling: u16 x, u16 y, u16 w, u16 h, u8 sprite
+//                             u16 transition count, then per transition:
+//                             u16 x, u16 y, u16 w, u16 h, str path, u32 target.x, u32 target.y
 //   Map entities ("MAPENTS_") u16 count, then per entity:
 //                             str prototype, u8 type, u32 uid, u32 pos.x, u32 pos.y, u8 sprite, u8 should_collide
 //   Flags ("FLAGSAVE")        u32 count, then per flag: str name, u8 value
@@ -34,7 +36,7 @@
 #define ENTITY_SAVE_EXT     "ent"
 
 #define MAP_SAVE_MAGIC      "MAPFILE_"
-#define MAP_SAVE_VERSION    1u
+#define MAP_SAVE_VERSION    2u
 
 #define MAP_ENTITY_MAGIC    "MAPENTS_"
 #define MAP_ENTITY_VERSION  1u
@@ -207,6 +209,16 @@ bool read_entity(struct EntitySaveable *out, u32 uid){
 	return true;
 }
 
+bool entity_save_exists(u32 uid){
+	char *path = entity_path(uid);
+	if(!path){return false;}
+	FILE *f = gild_fopen(path, "rb");
+	free(path);
+	if(!f){return false;}
+	fclose(f);
+	return true;
+}
+
 void free_entity_saveable(struct EntitySaveable *s){
 	if(!s){return;}
 	free((void *)s->prototype_path);
@@ -220,9 +232,19 @@ void free_entity_saveable(struct EntitySaveable *s){
 static bool map_size_ok(u16 w, u16 h){
 	return w > 0 && h > 0 && (u32)w * (u32)h <= MAP_MAX_TILES;
 }
+static bool rect_ok(u16 x, u16 y, u16 w, u16 h, u16 map_w, u16 map_h){
+	return w > 0 && h > 0 && (u32)x + w <= map_w && (u32)y + h <= map_h;
+}
 static bool ceiling_ok(const struct MapCeiling *c, u16 map_w, u16 map_h){
-	return c->w > 0 && c->h > 0 &&
-	       (u32)c->x + c->w <= map_w && (u32)c->y + c->h <= map_h;
+	return rect_ok(c->x, c->y, c->w, c->h, map_w, map_h);
+}
+static bool transition_ok(const struct MapTransition *t, u16 map_w, u16 map_h){
+	return rect_ok(t->x, t->y, t->w, t->h, map_w, map_h) && t->path && str_fits(t->path);
+}
+static void free_transition_array(struct MapTransition *ts, u16 count){
+	if(!ts){return;}
+	for(u16 i = 0; i < count; i++){free((void *)ts[i].path);}
+	free(ts);
 }
 
 bool write_map(const struct Map *m, const char *path){
@@ -239,6 +261,16 @@ bool write_map(const struct Map *m, const char *path){
 	for(u16 i = 0; i < m->ceiling_count; i++){
 		if(!ceiling_ok(&m->ceilings[i], m->w, m->h)){
 			GILD_LOG(GILD_INVALID_STATE, "Ceiling %u is empty or outside the map", (u32)i);
+			return false;
+		}
+	}
+	if(m->transition_count > 0 && !m->transitions){
+		GILD_LOG(GILD_INVALID_STATE, "Map has %u transitions but no transition array", (u32)m->transition_count);
+		return false;
+	}
+	for(u16 i = 0; i < m->transition_count; i++){
+		if(!transition_ok(&m->transitions[i], m->w, m->h)){
+			GILD_LOG(GILD_INVALID_STATE, "Transition %u is empty, outside the map, or has no path", (u32)i);
 			return false;
 		}
 	}
@@ -261,6 +293,17 @@ bool write_map(const struct Map *m, const char *path){
 		     gild_write_u16(f, c->h) &&
 		     gild_write_u8(f, c->sprite);
 	}
+	ok = ok && gild_write_u16(f, m->transition_count);
+	for(u16 i = 0; ok && i < m->transition_count; i++){
+		const struct MapTransition *t = &m->transitions[i];
+		ok = gild_write_u16(f, t->x) &&
+		     gild_write_u16(f, t->y) &&
+		     gild_write_u16(f, t->w) &&
+		     gild_write_u16(f, t->h) &&
+		     gild_write_str(f, t->path) &&
+		     gild_write_u32(f, t->target.x) &&
+		     gild_write_u32(f, t->target.y);
+	}
 	return finish_write(f, ok, path);
 }
 
@@ -269,9 +312,10 @@ bool read_map(struct Map *out, const char *path){
 	FILE *f = open_for_read(path);
 	if(!f){return false;}
 
-	u16 w = 0, h = 0, ccount = 0;
+	u16 w = 0, h = 0, ccount = 0, tcount = 0;
 	u8 *floors = NULL, *flags = NULL;
 	struct MapCeiling *ceilings = NULL;
+	struct MapTransition *transitions = NULL;
 
 	bool ok = gild_read_header(f, MAP_SAVE_MAGIC, MAP_SAVE_VERSION) &&
 	          gild_read_u16(f, &w) &&
@@ -302,11 +346,32 @@ bool read_map(struct Map *out, const char *path){
 		}
 	}
 
+	ok = ok && gild_read_u16(f, &tcount);
+	// calloc so every path starts NULL and free_transition_array is safe at any point.
+	if(ok && tcount > 0){transitions = GILD_XCALLOC(tcount, sizeof(struct MapTransition));}
+	for(u16 i = 0; ok && i < tcount; i++){
+		struct MapTransition *t = &transitions[i];
+		char *tpath = NULL;
+		ok = gild_read_u16(f, &t->x) &&
+		     gild_read_u16(f, &t->y) &&
+		     gild_read_u16(f, &t->w) &&
+		     gild_read_u16(f, &t->h) &&
+		     gild_read_str(f, &tpath, SAVE_STR_MAX) &&
+		     gild_read_u32(f, &t->target.x) &&
+		     gild_read_u32(f, &t->target.y);
+		t->path = tpath; // the array owns it from here, so the cleanup below frees it
+		if(ok && !transition_ok(t, w, h)){
+			GILD_LOG(GILD_CORRUPT, "Transition %u is empty, outside the map, or has no path", (u32)i);
+			ok = false;
+		}
+	}
+
 	ok = finish_read(f, ok, path);
 	if(!ok){
 		free(floors);
 		free(flags);
 		free(ceilings);
+		free_transition_array(transitions, tcount);
 		return false;
 	}
 	out->w = w;
@@ -315,6 +380,8 @@ bool read_map(struct Map *out, const char *path){
 	out->flags = flags;
 	out->ceilings = ceilings;
 	out->ceiling_count = ccount;
+	out->transitions = transitions;
+	out->transition_count = tcount;
 	out->player_state = 0;
 	out->player = 0;
 	return true;
@@ -342,10 +409,13 @@ void free_map(struct Map *m){
 	free(m->floors);
 	free(m->flags);
 	free(m->ceilings);
+	free_transition_array(m->transitions, m->transition_count);
 	m->floors = NULL;
 	m->flags = NULL;
 	m->ceilings = NULL;
 	m->ceiling_count = 0;
+	m->transitions = NULL;
+	m->transition_count = 0;
 	m->w = 0;
 	m->h = 0;
 	free_map_entities(m);

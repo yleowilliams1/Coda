@@ -140,3 +140,9 @@ struct EntityPrototype *open_prototype_file(const char *arg, const char mag[8], 
 	*proto = next_proto;
 	return proto;
 }
+
+void free_entity_prototype(struct EntityPrototype *p) {
+	if (!p) return;
+	free((void *)p->dialogue_path);
+	p->dialogue_path = NULL;
+}

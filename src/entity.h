@@ -47,5 +47,5 @@ struct EntitySaveable {
 	u32 actual_level;
 	u8 actual_flags;
 };
-
 struct EntityPrototype *open_prototype_file(const char *arg, const char mag[8], u32 ver);
+void free_entity_prototype(struct EntityPrototype *p);
