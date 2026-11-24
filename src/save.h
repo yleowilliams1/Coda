@@ -2,6 +2,7 @@
 #include "util/gild_basic.h"
 
 struct SaveFile{
+	u32 flag_version;
 	u32 instance_count;
 	u32 *instance_versions;
 };

@@ -29,6 +29,7 @@ bool serialize_save_file(struct SaveFile *s, u32 save_id, bool write){
 		io.ok = false;
 	}
 
+	gild_io_u32(&io, &t->flag_version);
 	gild_io_u32(&io, &t->instance_count);
 	for(int i = 0; i < (int)t->instance_count; i++){
 		gild_io_u32(&io, &t->instance_versions[i]);
