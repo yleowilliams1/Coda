@@ -42,6 +42,12 @@ enum DerivedType{
 	#undef X
 	ST_DERIVED_COUNT
 };
+enum SkillDifficulty{
+	SKILL_EASY      =  0,
+	SKILL_AVERAGE   = -1,
+	SKILL_HARD      = -2,
+	SKILL_VERY_HARD = -3,
+};
 struct ItemPrototype{
 	s16 use_health_mod_min;
 	s16 use_health_mod_max;
@@ -110,6 +116,10 @@ struct CharacterInstance{
 	// We don't serialize this
 	struct Gild_AstarPath path;
 };
+bool target_character(struct CharacterInstance *target, struct CharacterInstance *attacker, u32 item_uid);
+bool health_character(struct CharacterInstance *c, s16 val);
+bool skill_check(enum SkillType type, s32 mod, struct CharacterInstance *c);
+
 bool add_item(struct CharacterInstance *c, u32 item, u32 count);
 bool remove_item(struct CharacterInstance *c, u32 item, u32 count);
 bool equip_item(struct CharacterInstance *c, u32 item);
@@ -117,3 +127,9 @@ bool unequip_item(struct CharacterInstance *c, u32 item);
 
 // need to set unique_id and save_counter when reading
 bool serialize_character(struct CharacterInstance *c, bool write);
+bool instance_character(u32 uid, u32 save, struct CharacterInstance *out);
+bool free_character(struct CharacterInstance *c);
+
+s32 get_derived(enum DerivedType type, const struct CharacterInstance *c);
+s32 get_skill(enum SkillType type, const struct CharacterInstance *c);
+s32 get_ac(const struct CharacterInstance *c);
