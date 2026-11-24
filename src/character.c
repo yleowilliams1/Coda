@@ -382,8 +382,9 @@ bool serialize_character(struct CharacterInstance *c, bool write){
 	}
 
 	gild_io_u32(&io, &t->unique_id);
+	if(write){t->save_counter++;}
 	gild_io_u32(&io, &t->save_counter);
-
+	
 	gild_io_u32(&io, &t->prototype_id);
 
 	gild_io_u32(&io, &t->current_map);
