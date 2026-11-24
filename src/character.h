@@ -87,6 +87,7 @@ enum EntityFlags {
 	ENTITY_FLAG_LIST
 	#undef X
 };
+enum Direction{ DIR_NE, DIR_SE, DIR_SW, DIR_NW } ;
 struct CharacterInstance{
 	u32 unique_id;
 	u32 save_counter;
@@ -115,7 +116,17 @@ struct CharacterInstance{
 	
 	// We don't serialize this
 	struct Gild_AstarPath path;
+	u32 path_cursor;
+	float step_progress; // how far into the current step, in tiles
 };
+struct Map;
+
+void update_movement(struct Map *map, struct CharacterInstance *c, float dt);
+void stop_movement(struct CharacterInstance *c);
+bool is_moving(struct CharacterInstance *c);
+bool path_to(struct Map *map, struct CharacterInstance *c, u32 tile_x, u32 tile_y);
+bool level_up(struct CharacterInstance *c);
+
 bool target_character(struct CharacterInstance *target, struct CharacterInstance *attacker, u32 item_uid);
 bool health_character(struct CharacterInstance *c, s16 val);
 bool skill_check(enum SkillType type, s32 mod, struct CharacterInstance *c);
@@ -133,3 +144,5 @@ bool free_character(struct CharacterInstance *c);
 s32 get_derived(enum DerivedType type, const struct CharacterInstance *c);
 s32 get_skill(enum SkillType type, const struct CharacterInstance *c);
 s32 get_ac(const struct CharacterInstance *c);
+u32 get_xp_to_level(struct CharacterInstance *c);
+u32 get_unused_skill_points(struct CharacterInstance *c);

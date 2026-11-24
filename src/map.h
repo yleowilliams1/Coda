@@ -1,7 +1,6 @@
 #pragma once
 #include "util/gild_math.h"
 #include "util/gild_basic.h"
-#include "entity.h"
 
 // ---------------------------------------------------------------------------
 // Isometric layout. World coordinates are raylib's: pixels, (0,0) top-left, y down.
@@ -47,7 +46,6 @@ struct MapTransition {
 	gild_v2_u32 target;  // tile to drop the player on in that map
 };
 struct Map{
-	struct EntityList entities;
 	u16 w, h;
 
 	struct MapCeiling *ceilings;
