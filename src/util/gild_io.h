@@ -29,42 +29,71 @@ GILD_API bool gild_config(void *ptr, const char *path, Gild_ConfigParser func);
 GILD_API char *gild_format_path(const char *base, const char *format, s32 num);
 GILD_API bool  gild_parent_dir_exists(const char *path);
 
+// Read-or-write with a sticky error flag.
+//
+// One function both saves and loads a struct, so the two can never drift apart, and
+// there's no error check after every field: once any call fails, io->ok goes false
+// and stays false, and every later call does nothing. Check once at the end.
+//
+//     bool io_thing(struct Gild_IO *io, struct Thing *t){
+//         gild_io_u32(io, &t->id);
+//         gild_io_s16(io, &t->hp);
+//         for(u32 i = 0; i < 8; i++){gild_io_u32(io, &t->slots[i]);}
+//         return io->ok;
+//     }
+//
+//     struct Gild_IO io = gild_io_begin(f, false);  // false = reading
+//     struct Thing tmp = {0};                        // read into a zeroed copy
+//     io_thing(&io, &tmp);
+//     if(!gild_io_end(&io)){ ... throw tmp away ... }
+//
+// Every call also returns io->ok, for the rare case you need to stop straight away
+// (e.g. before allocating from a count you just read).
+// You can set io->ok = false yourself when a value you read is out of range;
+// everything after it is then skipped too.
+struct Gild_IO{
+	FILE *f;
+	bool writing; // true: write *v to the file, false: read from the file into *v
+	bool ok;      // starts true, goes false on the first failure and stays false
+};
+
+// ok starts false if f is NULL, so a failed fopen falls straight through to the end check.
+GILD_API struct Gild_IO gild_io_begin(FILE *f, bool writing);
+
+// Call when done. When writing it flushes, so a full disk is caught here instead of
+// missed (fwrite only fills a buffer). Doesn't close f, and fclose can still fail.
+GILD_API bool gild_io_end(struct Gild_IO *io);
+
 // Header: 8 magic bytes (written as-is), u64 timestamp, u32 version.
-// gild_read_header fails on a wrong magic OR a wrong version.
-GILD_API bool gild_write_header(FILE *f, const char mag[8], u32 version);
-GILD_API bool gild_read_header(FILE *f, const char mag[8], u32 version);
-
-GILD_API bool gild_write_bytes(FILE *f, const void *buf, size_t n);
-GILD_API bool gild_read_bytes(FILE *f, void *buf, size_t n);
-
-// Strings: u32 byte length, then the bytes (no terminator).
-// NULL and "" are both written as length 0 and both read back as NULL.
-// gild_read_str mallocs the result (caller frees). It fails if the stored length
-// is over max_len, so a corrupt file can't ask for a huge allocation.
-// On failure *out is left untouched.
-GILD_API bool gild_write_str(FILE *f, const char *s);
-GILD_API bool gild_read_str(FILE *f, char **out, u32 max_len);
+// Writing: writes *version and the current time.
+// Reading: fails only on a wrong magic. It hands back the file's version in *version
+// so you decide which versions you can still load.
+// timestamp may be NULL; otherwise it receives the time written or read (for save menus).
+GILD_API bool gild_io_header(struct Gild_IO *io, const char mag[8], u32 *version, u64 *timestamp);
 
 // All multi-byte integers are stored little-endian regardless of the host.
-GILD_API bool gild_write_u8(FILE *f, u8 v);
-GILD_API bool gild_write_u16(FILE *f, u16 v);
-GILD_API bool gild_write_u32(FILE *f, u32 v);
-GILD_API bool gild_write_u64(FILE *f, u64 v);
+// To write a computed value (an array count), put it in a variable first; on a read
+// the same variable receives it. Reads leave *v untouched on failure.
+GILD_API bool gild_io_u8 (struct Gild_IO *io, u8  *v);
+GILD_API bool gild_io_u16(struct Gild_IO *io, u16 *v);
+GILD_API bool gild_io_u32(struct Gild_IO *io, u32 *v);
+GILD_API bool gild_io_u64(struct Gild_IO *io, u64 *v);
 
-GILD_API bool gild_write_s8(FILE *f, s8 v);
-GILD_API bool gild_write_s16(FILE *f, s16 v);
-GILD_API bool gild_write_s32(FILE *f, s32 v);
-GILD_API bool gild_write_s64(FILE *f, s64 v);
+GILD_API bool gild_io_s8 (struct Gild_IO *io, s8  *v);
+GILD_API bool gild_io_s16(struct Gild_IO *io, s16 *v);
+GILD_API bool gild_io_s32(struct Gild_IO *io, s32 *v);
+GILD_API bool gild_io_s64(struct Gild_IO *io, s64 *v);
 
-GILD_API bool gild_read_u8(FILE *f, u8 *out);
-GILD_API bool gild_read_u16(FILE *f, u16 *out);
-GILD_API bool gild_read_u32(FILE *f, u32 *out);
-GILD_API bool gild_read_u64(FILE *f, u64 *out);
+GILD_API bool gild_io_bytes(struct Gild_IO *io, void *buf, size_t n);
 
-GILD_API bool gild_read_s8(FILE *f, s8 *out);
-GILD_API bool gild_read_s16(FILE *f, s16 *out);
-GILD_API bool gild_read_s32(FILE *f, s32 *out);
-GILD_API bool gild_read_s64(FILE *f, s64 *out);
+// Strings: u32 byte length, then the bytes (no terminator).
+// Writing: NULL and "" are both written as length 0.
+// Reading: mallocs the string into *s (caller frees); length 0 reads back as NULL.
+// A read fails if the stored length is over max_len, so a corrupt file can't ask
+// for a huge allocation (max_len is ignored when writing).
+// A read overwrites *s without freeing it, so read into a zeroed struct.
+// On failure *s is left untouched.
+GILD_API bool gild_io_str(struct Gild_IO *io, char **s, u32 max_len);
 
 #ifdef __cplusplus
 }

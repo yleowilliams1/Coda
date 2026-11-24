@@ -1,0 +1,547 @@
+diff --git a/data/maps/test.ments b/data/maps/test.ments
+index fedf9be8d09da14b2d5074829e51a72be5348570..dc2e37096b057671b2451f45d75e49d1a0c0237b 100644
+GIT binary patch
+delta 30
+jcmX?Le#BhV*D=7=FC;j=ZYOg#0|NsCGl<wIxLz6njX(#p
+
+delta 26
+hcmX?Ne!yJN*D=7=FC;j=ZYOg#0|NsC(?-$t(g1W@2eJSF
+
+diff --git a/src/editor.c b/src/editor.c
+index f4d4658..bb2bc32 100644
+--- a/src/editor.c
++++ b/src/editor.c
+@@ -175,8 +175,8 @@ static bool entity_on_tile(const struct Entity *e, s32 tx, s32 ty){
+ }
+ 
+ static bool uid_used(u32 uid){
+-	for(u16 i = 0; i < m.entity_count; i++){
+-		if(m.entities[i].uid == uid){return true;}
++	for(u16 i = 0; i < m.entities.count; i++){
++		if(m.entities.items[i].uid == uid){return true;}
+ 	}
+ 	return false;
+ }
+@@ -199,10 +199,10 @@ static void add_entity(s32 tx, s32 ty){
+ 		if(!auto_uid){set_status("UID %u is already used", uid); return;}
+ 		if(!next_free_uid(uid, &uid)){set_status("No free UID above %lu", typed); return;}
+ 	}
+-	if(m.entity_count == UINT16_MAX){set_status("Too many entities"); return;}
++	if(m.entities.count == UINT16_MAX){set_status("Too many entities"); return;}
+ 
+-	m.entities = GILD_XREALLOC(m.entities, ((size_t)m.entity_count + 1) * sizeof(struct Entity));
+-	struct Entity *e = &m.entities[m.entity_count++];
++	m.entities.items = GILD_XREALLOC(m.entities.items, ((size_t)m.entities.count + 1) * sizeof(struct Entity));
++	struct Entity *e = &m.entities.items[m.entities.count++];
+ 	// Stats, inventory, level and flags stay zeroed with initialised false: the game
+ 	// fills them from the prototype the first time it loads the map.
+ 	memset(e, 0, sizeof(*e));
+@@ -223,19 +223,19 @@ static void add_entity(s32 tx, s32 ty){
+ 
+ // Deletes the front-most entity on the tile.
+ static void delete_entity_at(s32 tx, s32 ty){
+-	for(int i = (int)m.entity_count - 1; i >= 0; i--){
+-		if(!entity_on_tile(&m.entities[i], tx, ty)){continue;}
+-		free((void *)m.entities[i].prototype);
+-		memmove(&m.entities[i], &m.entities[i + 1], (size_t)(m.entity_count - i - 1) * sizeof(struct Entity));
+-		m.entity_count--;
+-		if(m.entity_count == 0){free(m.entities); m.entities = NULL;}
++	for(int i = (int)m.entities.count - 1; i >= 0; i--){
++		if(!entity_on_tile(&m.entities.items[i], tx, ty)){continue;}
++		free((void *)m.entities.items[i].prototype);
++		memmove(&m.entities.items[i], &m.entities.items[i + 1], (size_t)(m.entities.count - i - 1) * sizeof(struct Entity));
++		m.entities.count--;
++		if(m.entities.count == 0){free(m.entities.items); m.entities.items = NULL;}
+ 		dirty = true;
+ 		return;
+ 	}
+ }
+ 
+ static void save(void){
+-	if(write_map(&m, map_path) && write_map_entities(&m, ent_path)){
++	if(write_map(&m, map_path) && write_map_entities(&m.entities, ent_path)){
+ 		dirty = false;
+ 		set_status("Saved %s", GetFileName(map_path));
+ 	} else {
+@@ -255,7 +255,7 @@ bool init_editor(const char *path, u16 w, u16 h){
+ 	if(!ent_path){return false;}
+ 
+ 	if(w == 0 || h == 0){
+-		if(!read_map(&m, map_path) || !read_map_entities(&m, ent_path)){
++		if(!read_map(&m, map_path) || !read_map_entities(&m.entities, ent_path)){
+ 			free_map(&m);
+ 			free(ent_path); ent_path = NULL;
+ 			return false;
+@@ -426,9 +426,9 @@ static void draw_overlays(void){
+ 	}
+ 	if(tool == TOOL_ENTITY){
+ 		// Entities whose texture is missing would otherwise be invisible.
+-		for(u16 i = 0; i < m.entity_count; i++){
++		for(u16 i = 0; i < m.entities.count; i++){
+ 			s32 tx, ty;
+-			map_world_to_tile(&m, (float)m.entities[i].pos.x, (float)m.entities[i].pos.y, &tx, &ty);
++			map_world_to_tile(&m, (float)m.entities.items[i].pos.x, (float)m.entities.items[i].pos.y, &tx, &ty);
+ 			outline_tiles(tx, ty, tx, ty, GREEN);
+ 		}
+ 	}
+@@ -513,7 +513,7 @@ static void draw_panel(void){
+ 	GuiLabel((Rectangle){x, y, w, 20}, hover_in ? TextFormat("Tile %d, %d", hover_tx, hover_ty) : "Tile -");
+ 	y += 20;
+ 	GuiLabel((Rectangle){x, y, w, 20}, TextFormat("%u entities, %u ceilings, %u exits",
+-	         (u32)m.entity_count, (u32)m.ceiling_count, (u32)m.transition_count));
++	         (u32)m.entities.count, (u32)m.ceiling_count, (u32)m.transition_count));
+ 	y += ROW;
+ 	GuiLabel((Rectangle){x, y, w, 20}, "LMB place   RMB erase");
+ 	y += 18;
+diff --git a/src/entity.h b/src/entity.h
+index 8625fed..a1ecc0d 100644
+--- a/src/entity.h
++++ b/src/entity.h
+@@ -71,5 +71,14 @@ struct Entity{
+ 	u32 actual_level;
+ 	u8 actual_flags;
+ };
++
++// A map's entities and which save they are. This is what an entity file holds.
++struct EntityList{
++	// 0 for the map's own .ments (the editor never changes it). Each game save adds
++	// one and writes "<save_index>.<map name>.ments", see write_entity_save.
++	u32 save_index;
++	u16 count;
++	struct Entity *items;
++};
+ struct EntityPrototype *open_prototype_file(const char *arg, const char mag[8], u32 ver);
+ void free_entity_prototype(struct EntityPrototype *p);
+diff --git a/src/game.c b/src/game.c
+index 888da35..8617914 100644
+--- a/src/game.c
++++ b/src/game.c
+@@ -2,26 +2,22 @@
+ #include <string.h>
+ #include "util/gild_basic.h"
+ #include "util/gild_log.h"
++#include "util/gild_string.h"
+ #include "map.h"
+ #include "entity.h"
+ #include "save.h"
+ #include "util/gild_mem.h"
+ #include "game.h"
+ 
+-// Reads the map's entities: the save copy if there is one and it reads, otherwise
+-// the .ments next to the map.
+-static bool read_entities(struct Map *m, const char *path, const char *save_path){
+-	if(save_file_exists(save_path)){
+-		if(read_map_entities(m, save_path)){
+-			GILD_LOG(GILD_INFO, "Loaded entities from save %s", save_path);
+-			return true;
+-		}
+-		// read_map_entities has logged why. Starting fresh keeps the game going, but
+-		// the next save will overwrite the broken file.
+-		GILD_LOG(GILD_CORRUPT, "Save %s is unreadable, starting from the map's entities", save_path);
++// Reads the map's own .ments (save 0) or game save `save`.
++static bool read_entities(struct EntityList *out, const char *path, u32 save){
++	if(save > 0){
++		if(!read_entity_save(out, path, save)){return false;} // already logged why
++		GILD_LOG(GILD_INFO, "Loaded save %u of %s", save, path);
++		return true;
+ 	}
+ 	char *epath = map_entity_path(path);
+-	bool ok = epath && read_map_entities(m, epath);
++	bool ok = epath && read_map_entities(out, epath);
+ 	free(epath);
+ 	return ok;
+ }
+@@ -40,20 +36,19 @@ static void fill_from_prototype(struct Entity *e, const struct EntityPrototype *
+ // yet are filled from their prototype.
+ // On failure returns false and leaves out untouched. On success out is
+ // overwritten (not freed first) and owns everything in it: free with free_game_data.
+-bool load_map(const char *path, struct GameData *out){
++bool load_map(const char *path, u32 save, struct GameData *out){
+ 	if(!path || !out){GILD_LOG(GILD_IS_NULL, "Passed NULL path or output"); return false;}
+ 
+ 	struct Map *m = GILD_XCALLOC(1, sizeof(*m));
+-	char *save_path = map_entity_save_path(path);
+-	bool ok = save_path && read_map(m, path) && read_entities(m, path, save_path);
+-	if(!ok){free_map(m); free(m); free(save_path); return false;}
++	bool ok = read_map(m, path) && read_entities(&m->entities, path, save);
++	if(!ok){free_map(m); free(m); return false;}
+ 
+ 	// Too big for the stack.
+ 	struct GameData *g = GILD_XCALLOC(1, sizeof(*g));
+ 	g->m = m;
+-	g->save_path = save_path;
+-	for(u16 i = 0; i < m->entity_count; i++){
+-		struct Entity *e = &m->entities[i];
++	g->map_path = gild_copy_alloc_str(path, strlen(path));
++	for(u16 i = 0; i < m->entities.count; i++){
++		struct Entity *e = &m->entities.items[i];
+ 		if((e->type != NPC && e->type != PLAYER) || !e->prototype){continue;}
+ 		// proto and proto_uids are filled in lockstep, so one check covers both.
+ 		if(g->active_proto >= ESIZE){
+@@ -77,9 +72,9 @@ bool load_map(const char *path, struct GameData *out){
+ 	return true;
+ }
+ 
+-bool save_entities(const struct GameData *g){
+-	if(!g || !g->m || !g->save_path){GILD_LOG(GILD_IS_NULL, "Passed NULL or unloaded game data"); return false;}
+-	return write_map_entities(g->m, g->save_path);
++bool save_entities(struct GameData *g){
++	if(!g || !g->m || !g->map_path){GILD_LOG(GILD_IS_NULL, "Passed NULL or unloaded game data"); return false;}
++	return write_entity_save(&g->m->entities, g->map_path);
+ }
+ 
+ const struct EntityPrototype *entity_prototype(const struct GameData *g, u32 uid){
+@@ -90,13 +85,13 @@ const struct EntityPrototype *entity_prototype(const struct GameData *g, u32 uid
+ 	return NULL;
+ }
+ 
+-// Frees what g owns (the map, its entities, the prototypes and the save path), not g itself.
++// Frees what g owns (the map, its entities, the prototypes and the map path), not g itself.
+ void free_game_data(struct GameData *g){
+ 	if(!g){return;}
+ 	for(u8 i = 0; i < g->active_proto; i++){free_entity_prototype(&g->proto[i]);}
+ 	g->active_proto = 0;
+-	free(g->save_path);
+-	g->save_path = NULL;
++	free(g->map_path);
++	g->map_path = NULL;
+ 	free_map(g->m);
+ 	free(g->m);
+ 	g->m = NULL;
+diff --git a/src/game.h b/src/game.h
+index 600d20e..cf5da7f 100644
+--- a/src/game.h
++++ b/src/game.h
+@@ -6,18 +6,21 @@
+ #define ESIZE 32
+ struct GameData{
+ 	struct Map *m;       // m->entities are the entities, prototype-filled and saved as they are
+-	char *save_path;     // where save_entities writes, see map_entity_save_path
++	char *map_path;      // the map this was loaded from; save_entities names its files after it
+ 
+ 	// Prototypes of the NPC/PLAYER entities. proto[k] belongs to the entity whose uid
+-	// is proto_uids[k]. Looked up by uid because draw_map reorders m->entities.
++	// is proto_uids[k]. Looked up by uid because draw_map reorders m->entities.items.
+ 	struct EntityPrototype proto[ESIZE];
+ 	u32 proto_uids[ESIZE];
+ 	u8 active_proto;
+ };
+ 
+-bool load_map(const char *path, struct GameData *out);
+-// Writes every entity in g->m to g->save_path. The directory must already exist.
+-bool save_entities(const struct GameData *g);
++// save 0 loads the map's own .ments; any other number loads that game save
++// ("<save>.<map name>.ments", see map_entity_save_path) and fails if it can't be read.
++bool load_map(const char *path, u32 save, struct GameData *out);
++// Writes the next game save: adds one to g->m->entities.save_index and writes the file
++// for that number, see write_entity_save. The directory must already exist.
++bool save_entities(struct GameData *g);
+ // Prototype of the entity with this uid, or NULL if it has none loaded.
+ const struct EntityPrototype *entity_prototype(const struct GameData *g, u32 uid);
+ void free_game_data(struct GameData *g);
+diff --git a/src/map.c b/src/map.c
+index c672863..fcb1957 100644
+--- a/src/map.c
++++ b/src/map.c
+@@ -71,11 +71,11 @@ static int compare(const void *a, const void *b){
+ }
+ 
+ void update_entity(struct Map *m, u32 uid, gild_v2_u32 new_pos, u8 new_sprite){
+-	if(!m || !m->entities){return;}
+-	for(u32 i = 0; i < m->entity_count; i++){
+-		if(m->entities[i].uid != uid){continue;}
+-		m->entities[i].pos = new_pos;
+-		m->entities[i].sprite = new_sprite;
++	if(!m || !m->entities.items){return;}
++	for(u32 i = 0; i < m->entities.count; i++){
++		if(m->entities.items[i].uid != uid){continue;}
++		m->entities.items[i].pos = new_pos;
++		m->entities.items[i].sprite = new_sprite;
+ 		return;
+ 	}
+ 	return;
+@@ -83,14 +83,14 @@ void update_entity(struct Map *m, u32 uid, gild_v2_u32 new_pos, u8 new_sprite){
+ 
+ void draw_map(struct Map *m){
+ 	if(!m || !m->floors || m->w == 0 || m->h == 0){return;}
+-	u16 ecount = m->entities ? m->entity_count : 0;
++	u16 ecount = m->entities.items ? m->entities.count : 0;
+ 
+-	if(ecount > 1){qsort(m->entities, ecount, sizeof(struct Entity), compare);}
++	if(ecount > 1){qsort(m->entities.items, ecount, sizeof(struct Entity), compare);}
+ 
+ 	// Found again every frame, after the sort, because the sort moves the player around.
+ 	m->player_state = NO_PLAYER;
+ 	for(u16 i = 0; i < ecount; i++){
+-		if(m->entities[i].type == PLAYER){
++		if(m->entities.items[i].type == PLAYER){
+ 			m->player_state = FOUND;
+ 			m->player = i;
+ 			break;
+@@ -111,21 +111,21 @@ void draw_map(struct Map *m){
+ 			draw_tex(m->floors[ty * m->w + tx], (s32)a.x, (s32)a.y);
+ 		}
+ 		u32 next_y = (d + 2) * (TILE_H / 2);
+-		while(e < ecount && m->entities[e].pos.y < next_y){
+-			const struct Entity *ent = &m->entities[e++];
++		while(e < ecount && m->entities.items[e].pos.y < next_y){
++			const struct Entity *ent = &m->entities.items[e++];
+ 			draw_tex(ent->sprite, (s32)ent->pos.x, (s32)ent->pos.y);
+ 		}
+ 	}
+ 	// Anything below the map's last diagonal.
+ 	while(e < ecount){
+-		const struct Entity *ent = &m->entities[e++];
++		const struct Entity *ent = &m->entities.items[e++];
+ 		draw_tex(ent->sprite, (s32)ent->pos.x, (s32)ent->pos.y);
+ 	}
+ 
+ 	// Ceilings over everything, except the one the player is standing under.
+ 	s32 ptx = -1, pty = -1;
+ 	if(m->player_state == FOUND){
+-		const struct Entity *p = &m->entities[m->player];
++		const struct Entity *p = &m->entities.items[m->player];
+ 		map_world_to_tile(m, (float)p->pos.x, (float)p->pos.y, &ptx, &pty);
+ 	}
+ 	for(u16 i = 0; i < m->ceiling_count && m->ceilings; i++){
+diff --git a/src/map.h b/src/map.h
+index f5b32ad..e58c8b2 100644
+--- a/src/map.h
++++ b/src/map.h
+@@ -47,8 +47,7 @@ struct MapTransition {
+ 	gild_v2_u32 target;  // tile to drop the player on in that map
+ };
+ struct Map{
+-	struct Entity *entities;
+-	u16 entity_count;
++	struct EntityList entities;
+ 	u16 w, h;
+ 
+ 	struct MapCeiling *ceilings;
+@@ -69,7 +68,7 @@ void update_entity(struct Map *m, u32 uid, gild_v2_u32 new_pos, u8 new_sprite);
+ 
+ // Draws floors back to front with the entities y-sorted in between, so walls on
+ // nearer tiles cover entities behind them, then the ceilings (except the one the
+-// player is under). Sorts m->entities in place.
++// player is under). Sorts m->entities.items in place.
+ void draw_map(struct Map *m);
+ 
+ // Anchor of a tile in world pixels. Only valid for tiles inside the map.
+diff --git a/src/save.c b/src/save.c
+index 056383b..bfe1ae6 100644
+--- a/src/save.c
++++ b/src/save.c
+@@ -20,11 +20,11 @@
+ //                             u16 ceiling count, then per ceiling: u16 x, u16 y, u16 w, u16 h, u8 sprite
+ //                             u16 transition count, then per transition:
+ //                             u16 x, u16 y, u16 w, u16 h, str path, u32 target.x, u32 target.y
+-//   Map entities ("MAPENTS_") u16 count, then per entity (a whole struct Entity):
++//   Map entities ("MAPENTS_") u32 save_index, u16 count, then per entity (a whole struct Entity):
+ //                             str prototype, u8 type, u32 uid, u32 pos.x, u32 pos.y, u8 sprite, u8 should_collide,
+ //                             u8 initialised, s16 array permanent_bstat_upgrade, s16 array permanent_skill_upgrade,
+ //                             item stack array hotbar_items, item stack array items, u32 actual_level, u8 actual_flags
+-//                             Used both for the .ments next to the map and for the game's save copy.
++//                             Used both for the .ments next to the map and for the game's saves.
+ //   Flags ("FLAGSAVE")        u32 count, then per flag: str name, u8 value
+ //                             The hash is not stored; flag_set recomputes it on load, so changing
+ //                             the hash function doesn't break old saves.
+@@ -35,7 +35,7 @@
+ #define MAP_SAVE_VERSION    2u
+ 
+ #define MAP_ENTITY_MAGIC    "MAPENTS_"
+-#define MAP_ENTITY_VERSION  2u   // 2: whole struct Entity (was placement only)
++#define MAP_ENTITY_VERSION  3u   // 2: whole struct Entity (was placement only), 3: save index first
+ 
+ #define FLAG_SAVE_MAGIC     "FLAGSAVE"
+ #define FLAG_SAVE_VERSION   1u
+@@ -331,12 +331,14 @@ char *map_entity_path(const char *map_path){
+ 	return ments_path("", map_path, 0, ext_at);
+ }
+ 
+-char *map_entity_save_path(const char *map_path){
++char *map_entity_save_path(const char *map_path, u32 number){
+ 	if(!map_path){GILD_LOG(GILD_IS_NULL, "Passed NULL map path"); return NULL;}
+ 	size_t name_at, ext_at;
+ 	split_path(map_path, &name_at, &ext_at);
+ 	if(ext_at == name_at){GILD_LOG(GILD_INVALID_ARG, "Map path '%s' has no file name", map_path); return NULL;}
+-	return ments_path(MAP_ENTITY_SAVE_DIR "/", map_path, name_at, ext_at);
++	char prefix[sizeof(MAP_ENTITY_SAVE_DIR) + 16]; // "/", up to 10 digits, "."
++	snprintf(prefix, sizeof(prefix), "%s/%u.", MAP_ENTITY_SAVE_DIR, number);
++	return ments_path(prefix, map_path, name_at, ext_at);
+ }
+ 
+ bool save_file_exists(const char *path){
+@@ -361,7 +363,7 @@ void free_map(struct Map *m){
+ 	m->transition_count = 0;
+ 	m->w = 0;
+ 	m->h = 0;
+-	free_map_entities(m);
++	free_entity_list(&m->entities);
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -416,14 +418,15 @@ static bool read_entity_record(FILE *f, struct Entity *e, u16 index){
+ 	return ok;
+ }
+ 
+-bool write_map_entities(const struct Map *m, const char *path){
+-	if(!m || !path){GILD_LOG(GILD_IS_NULL, "Passed NULL map or path"); return false;}
+-	if(m->entity_count > 0 && !m->entities){
+-		GILD_LOG(GILD_INVALID_STATE, "Map has %u entities but no entity array", (u32)m->entity_count);
++// Writes l with save_index as its index, so write_entity_save can write the new index
++// without touching l until the write has worked.
++static bool write_entity_file(const struct EntityList *l, u32 save_index, const char *path){
++	if(l->count > 0 && !l->items){
++		GILD_LOG(GILD_INVALID_STATE, "Entity list has %u entities but no array", (u32)l->count);
+ 		return false;
+ 	}
+-	for(u16 i = 0; i < m->entity_count; i++){
+-		const struct Entity *e = &m->entities[i];
++	for(u16 i = 0; i < l->count; i++){
++		const struct Entity *e = &l->items[i];
+ 		if((u32)e->type > (u32)PROP){
+ 			GILD_LOG(GILD_INVALID_STATE, "Map entity %u has invalid type %u", (u32)i, (u32)e->type);
+ 			return false;
+@@ -438,21 +441,29 @@ bool write_map_entities(const struct Map *m, const char *path){
+ 	if(!f){return false;}
+ 
+ 	bool ok = gild_write_header(f, MAP_ENTITY_MAGIC, MAP_ENTITY_VERSION) &&
+-	          gild_write_u16(f, m->entity_count);
+-	for(u16 i = 0; ok && i < m->entity_count; i++){
+-		ok = write_entity_record(f, &m->entities[i]);
++	          gild_write_u32(f, save_index) &&
++	          gild_write_u16(f, l->count);
++	for(u16 i = 0; ok && i < l->count; i++){
++		ok = write_entity_record(f, &l->items[i]);
+ 	}
+ 	return finish_write(f, ok, path);
+ }
+ 
+-bool read_map_entities(struct Map *m, const char *path){
+-	if(!m || !path){GILD_LOG(GILD_IS_NULL, "Passed NULL map or path"); return false;}
++bool write_map_entities(const struct EntityList *l, const char *path){
++	if(!l || !path){GILD_LOG(GILD_IS_NULL, "Passed NULL entity list or path"); return false;}
++	return write_entity_file(l, l->save_index, path);
++}
++
++bool read_map_entities(struct EntityList *out, const char *path){
++	if(!out || !path){GILD_LOG(GILD_IS_NULL, "Passed NULL entity list or path"); return false;}
+ 	FILE *f = open_for_read(path);
+ 	if(!f){return false;}
+ 
++	u32 save_index = 0;
+ 	u16 count = 0;
+ 	struct Entity *ents = NULL;
+ 	bool ok = gild_read_header(f, MAP_ENTITY_MAGIC, MAP_ENTITY_VERSION) &&
++	          gild_read_u32(f, &save_index) &&
+ 	          gild_read_u16(f, &count);
+ 	// calloc so every entity starts zeroed (prototype NULL) and free_entity_array is safe at any point.
+ 	if(ok && count > 0){ents = GILD_XCALLOC(count, sizeof(struct Entity));}
+@@ -466,16 +477,50 @@ bool read_map_entities(struct Map *m, const char *path){
+ 		free_entity_array(ents, count);
+ 		return false;
+ 	}
+-	m->entities = ents;
+-	m->entity_count = count;
++	out->save_index = save_index;
++	out->count = count;
++	out->items = ents;
+ 	return true;
+ }
+ 
+-void free_map_entities(struct Map *m){
+-	if(!m){return;}
+-	free_entity_array(m->entities, m->entity_count);
+-	m->entities = NULL;
+-	m->entity_count = 0;
++bool write_entity_save(struct EntityList *l, const char *map_path){
++	if(!l || !map_path){GILD_LOG(GILD_IS_NULL, "Passed NULL entity list or map path"); return false;}
++	if(l->save_index == UINT32_MAX){
++		GILD_LOG(GILD_FULL, "Save index of %s is at its maximum, can't save again", map_path);
++		return false;
++	}
++	u32 next = l->save_index + 1;
++	char *path = map_entity_save_path(map_path, next);
++	if(!path){return false;}
++	bool ok = write_entity_file(l, next, path);
++	if(ok){l->save_index = next;}
++	free(path);
++	return ok;
++}
++
++bool read_entity_save(struct EntityList *out, const char *map_path, u32 number){
++	if(!out || !map_path){GILD_LOG(GILD_IS_NULL, "Passed NULL entity list or map path"); return false;}
++	char *path = map_entity_save_path(map_path, number);
++	if(!path){return false;}
++	struct EntityList tmp = {0};
++	bool ok = read_map_entities(&tmp, path);
++	if(ok && tmp.save_index != number){
++		GILD_LOG(GILD_CORRUPT, "%s holds save %u, not %u", path, tmp.save_index, number);
++		free_entity_list(&tmp);
++		ok = false;
++	}
++	free(path);
++	if(!ok){return false;}
++	*out = tmp;
++	return true;
++}
++
++void free_entity_list(struct EntityList *l){
++	if(!l){return;}
++	free_entity_array(l->items, l->count);
++	l->items = NULL;
++	l->count = 0;
++	l->save_index = 0;
+ }
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/src/save.h b/src/save.h
+index ed32f79..cbf6ce1 100644
+--- a/src/save.h
++++ b/src/save.h
+@@ -31,25 +31,34 @@ bool read_map(struct Map *out, const char *path);
+ // The entity file the editor writes next to a map file: the extension is swapped
+ // for ".ments" (or added if there is none). malloc'd, caller frees.
+ char *map_entity_path(const char *map_path);
+-// The entity file the game saves to, so playing never changes the map's own .ments:
+-// "<MAP_ENTITY_SAVE_DIR>/<map file name>.ments", e.g. "data/maps/town.map" gives
+-// "data/save/maps/town.ments". Only the file name is used, so two maps with the same
+-// name in different folders share a save. malloc'd, caller frees.
+-char *map_entity_save_path(const char *map_path);
++// The file game save `number` goes to, so playing never changes the map's own .ments:
++// "<MAP_ENTITY_SAVE_DIR>/<number>.<map file name>.ments", e.g. "data/maps/town.map"
++// and 3 give "data/save/maps/3.town.ments". Only the file name is used, so two maps
++// with the same name in different folders share saves. malloc'd, caller frees.
++char *map_entity_save_path(const char *map_path, u32 number);
+ // Whether path can be opened for reading. Logs nothing.
+ bool save_file_exists(const char *path);
+ 
+-// Both files (.ments next to the map and the save copy) use the same format and
+-// hold whole struct Entity records, so the editor and the game read and write the
+-// same thing.
+-bool write_map_entities(const struct Map *m, const char *path);
+-bool read_map_entities(struct Map *m, const char *path);   // fills m->entities and m->entity_count only
++// Entity files hold a whole EntityList: the save index first, then every struct Entity.
++// The editor's .ments next to the map and the game saves use the same format.
++
++// Any path, e.g. the editor's .ments. Writes l->save_index as it is.
++bool write_map_entities(const struct EntityList *l, const char *path);
++bool read_map_entities(struct EntityList *out, const char *path);
++
++// Game saves. write_entity_save adds one to l->save_index and writes the file for the
++// new number (see map_entity_save_path), so every save is a new file and older ones
++// are kept. If the write fails, l->save_index is left as it was.
++// Saving after loading an older save writes over the save that came after it.
++bool write_entity_save(struct EntityList *l, const char *map_path);
++// Reads save `number` of the map. Fails if the index stored in the file isn't number.
++bool read_entity_save(struct EntityList *out, const char *map_path, u32 number);
+ 
+ bool write_flags(const struct FlagManager *fm, const char *path);
+ bool read_flags(struct FlagManager *out, const char *path);
+ 
+ // Only for data whose strings are heap-owned, e.g. anything from the read functions.
+ // Calling these on string literals will crash.
+-void free_map_entities(struct Map *m);
++void free_entity_list(struct EntityList *l);
+ // Floors, flags, ceilings, transitions and entities.
+ void free_map(struct Map *m);

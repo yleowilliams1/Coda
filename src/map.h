@@ -1,6 +1,7 @@
 #pragma once
 #include "util/gild_math.h"
 #include "util/gild_basic.h"
+#include "entity.h"
 
 // ---------------------------------------------------------------------------
 // Isometric layout. World coordinates are raylib's: pixels, (0,0) top-left, y down.
@@ -31,24 +32,8 @@
 // Tile flags (one byte per tile in Map.flags)
 #define MAP_FLAG_COLLIDE (1u << 0)
 
-enum MapEntityType{
-	PLAYER,
-	NPC,
-	DOOR,
-	LOOT,
-	PROP,
-};
+// Entities are struct Entity, in entity.h.
 
-// pos is the entity's anchor in world pixels (see above). The editor snaps it to a
-// tile anchor on creation; the entity manager moves it freely afterwards.
-struct MapEntity{
-	const char *prototype;
-	enum MapEntityType type;
-	u32 uid;
-	gild_v2_u32 pos;
-	u8 sprite;
-	u8 should_collide;
-};
 // Rectangle in tile coordinates.
 struct MapCeiling {
 	u16 x, y, w, h;
@@ -62,8 +47,7 @@ struct MapTransition {
 	gild_v2_u32 target;  // tile to drop the player on in that map
 };
 struct Map{
-	struct MapEntity *entities;
-	u16 entity_count;
+	struct EntityList entities;
 	u16 w, h;
 
 	struct MapCeiling *ceilings;
@@ -84,7 +68,7 @@ void update_entity(struct Map *m, u32 uid, gild_v2_u32 new_pos, u8 new_sprite);
 
 // Draws floors back to front with the entities y-sorted in between, so walls on
 // nearer tiles cover entities behind them, then the ceilings (except the one the
-// player is under). Sorts m->entities in place.
+// player is under). Sorts m->entities.items in place.
 void draw_map(struct Map *m);
 
 // Anchor of a tile in world pixels. Only valid for tiles inside the map.

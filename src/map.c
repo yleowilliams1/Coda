@@ -63,19 +63,19 @@ bool map_world_to_tile(const struct Map *m, float x, float y, s32 *tx, s32 *ty){
 
 // Back to front: lower y first, then left to right.
 static int compare(const void *a, const void *b){
-	const struct MapEntity *x = (const struct MapEntity *)a;
-	const struct MapEntity *y = (const struct MapEntity *)b;
+	const struct Entity *x = (const struct Entity *)a;
+	const struct Entity *y = (const struct Entity *)b;
 	if(x->pos.y != y->pos.y){return x->pos.y < y->pos.y ? -1 : 1;}
 	if(x->pos.x != y->pos.x){return x->pos.x < y->pos.x ? -1 : 1;}
 	return 0;
 }
 
 void update_entity(struct Map *m, u32 uid, gild_v2_u32 new_pos, u8 new_sprite){
-	if(!m || !m->entities){return;}
-	for(u32 i = 0; i < m->entity_count; i++){
-		if(m->entities[i].uid != uid){continue;}
-		m->entities[i].pos = new_pos;
-		m->entities[i].sprite = new_sprite;
+	if(!m || !m->entities.items){return;}
+	for(u32 i = 0; i < m->entities.count; i++){
+		if(m->entities.items[i].uid != uid){continue;}
+		m->entities.items[i].pos = new_pos;
+		m->entities.items[i].sprite = new_sprite;
 		return;
 	}
 	return;
@@ -83,14 +83,14 @@ void update_entity(struct Map *m, u32 uid, gild_v2_u32 new_pos, u8 new_sprite){
 
 void draw_map(struct Map *m){
 	if(!m || !m->floors || m->w == 0 || m->h == 0){return;}
-	u16 ecount = m->entities ? m->entity_count : 0;
+	u16 ecount = m->entities.items ? m->entities.count : 0;
 
-	if(ecount > 1){qsort(m->entities, ecount, sizeof(struct MapEntity), compare);}
+	if(ecount > 1){qsort(m->entities.items, ecount, sizeof(struct Entity), compare);}
 
 	// Found again every frame, after the sort, because the sort moves the player around.
 	m->player_state = NO_PLAYER;
 	for(u16 i = 0; i < ecount; i++){
-		if(m->entities[i].type == PLAYER){
+		if(m->entities.items[i].type == PLAYER){
 			m->player_state = FOUND;
 			m->player = i;
 			break;
@@ -111,21 +111,21 @@ void draw_map(struct Map *m){
 			draw_tex(m->floors[ty * m->w + tx], (s32)a.x, (s32)a.y);
 		}
 		u32 next_y = (d + 2) * (TILE_H / 2);
-		while(e < ecount && m->entities[e].pos.y < next_y){
-			const struct MapEntity *ent = &m->entities[e++];
+		while(e < ecount && m->entities.items[e].pos.y < next_y){
+			const struct Entity *ent = &m->entities.items[e++];
 			draw_tex(ent->sprite, (s32)ent->pos.x, (s32)ent->pos.y);
 		}
 	}
 	// Anything below the map's last diagonal.
 	while(e < ecount){
-		const struct MapEntity *ent = &m->entities[e++];
+		const struct Entity *ent = &m->entities.items[e++];
 		draw_tex(ent->sprite, (s32)ent->pos.x, (s32)ent->pos.y);
 	}
 
 	// Ceilings over everything, except the one the player is standing under.
 	s32 ptx = -1, pty = -1;
 	if(m->player_state == FOUND){
-		const struct MapEntity *p = &m->entities[m->player];
+		const struct Entity *p = &m->entities.items[m->player];
 		map_world_to_tile(m, (float)p->pos.x, (float)p->pos.y, &ptx, &pty);
 	}
 	for(u16 i = 0; i < m->ceiling_count && m->ceilings; i++){

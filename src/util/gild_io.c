@@ -56,32 +56,254 @@ FILE *gild_fopen(const char *path, const char *mode){
 #endif
 }
 
-bool gild_write_header(FILE *f, const char mag[8], u32 version){
-	if(!f || !mag){return false;}
-	// Magic is written byte-for-byte, so it reads back the same on any host.
-	if(gild_write_bytes(f, mag, 8) && gild_write_u64(f, (u64)time(NULL)) && gild_write_u32(f, version)){
+// Raw little-endian reads and writes. Static: outside this file use gild_io_*.
+static bool write_bytes(FILE *f, const void *buf, size_t n) {
+	if (!f || (n > 0 && !buf)) { return false; }
+	return (n == 0 || fwrite(buf, 1, n, f) == n) ? true : false;
+}
+
+static bool read_bytes(FILE *f, void *buf, size_t n) {
+	if (!f || (n > 0 && !buf)) { return false; }
+	return (n == 0 || fread(buf, 1, n, f) == n) ? true : false;
+}
+
+static bool write_u8(FILE *f, u8 v) {
+	if (!f) { return false; }
+	return fwrite(&v, 1, 1, f) == 1 ? true : false;
+}
+
+static bool write_u16(FILE *f, u16 v) {
+	if (!f) { return false; }
+	u8 b[2] = {
+		(u8)(v & 0xFF),
+		(u8)((v >> 8) & 0xFF)
+	};
+	return fwrite(b, 1, 2, f) == 2 ? true : false;
+}
+
+static bool write_u32(FILE *f, u32 v) {
+	if (!f) { return false; }
+	u8 b[4] = {
+		(u8)(v & 0xFF),
+		(u8)((v >> 8)  & 0xFF),
+		(u8)((v >> 16) & 0xFF),
+		(u8)((v >> 24) & 0xFF)
+	};
+	return fwrite(b, 1, 4, f) == 4 ? true : false;
+}
+
+static bool write_u64(FILE *f, u64 v) {
+	if (!f) { return false; }
+	u8 b[8] = {
+		(u8)(v & 0xFF),
+		(u8)((v >> 8)  & 0xFF),
+		(u8)((v >> 16) & 0xFF),
+		(u8)((v >> 24) & 0xFF),
+		(u8)((v >> 32) & 0xFF),
+		(u8)((v >> 40) & 0xFF),
+		(u8)((v >> 48) & 0xFF),
+		(u8)((v >> 56) & 0xFF)
+	};
+	return fwrite(b, 1, 8, f) == 8 ? true : false;
+}
+
+static bool write_s8(FILE *f, s8 v) {
+	return write_u8(f, (u8)v);
+}
+
+static bool write_s16(FILE *f, s16 v) {
+	return write_u16(f, (u16)v);
+}
+
+static bool write_s32(FILE *f, s32 v) {
+	return write_u32(f, (u32)v);
+}
+
+static bool write_s64(FILE *f, s64 v) {
+	return write_u64(f, (u64)v);
+}
+
+static bool read_u8(FILE *f, u8 *out) {
+	if (!f || !out) { return false; }
+	return fread(out, 1, 1, f) == 1 ? true : false;
+}
+
+static bool read_u16(FILE *f, u16 *out) {
+	u8 b[2];
+	if (!f || !out) { return false; }
+	if (fread(b, 1, 2, f) != 2) { return false; }
+	*out = (u16)((u16)b[0] | ((u16)b[1] << 8));
+	return true;
+}
+
+static bool read_u32(FILE *f, u32 *out) {
+	u8 b[4];
+	if (!f || !out) { return false; }
+	if (fread(b, 1, 4, f) != 4) { return false; }
+	*out = (u32)b[0]
+	     | ((u32)b[1] << 8)
+	     | ((u32)b[2] << 16)
+	     | ((u32)b[3] << 24);
+	return true;
+}
+
+static bool read_u64(FILE *f, u64 *out) {
+	u8 b[8];
+	if (!f || !out) { return false; }
+	if (fread(b, 1, 8, f) != 8) { return false; }
+	*out = (u64)b[0]
+	     | ((u64)b[1] << 8)
+	     | ((u64)b[2] << 16)
+	     | ((u64)b[3] << 24)
+	     | ((u64)b[4] << 32)
+	     | ((u64)b[5] << 40)
+	     | ((u64)b[6] << 48)
+	     | ((u64)b[7] << 56);
+	return true;
+}
+
+static bool read_s8(FILE *f, s8 *out) {
+	u8 v;
+	if (!read_u8(f, &v)) { return false; }
+	if (out) { *out = (s8)v; }
+	return true;
+}
+
+static bool read_s16(FILE *f, s16 *out) {
+	u16 v;
+	if (!read_u16(f, &v)) { return false; }
+	if (out) { *out = (s16)v; }
+	return true;
+}
+
+static bool read_s32(FILE *f, s32 *out) {
+	u32 v;
+	if (!read_u32(f, &v)) { return false; }
+	if (out) { *out = (s32)v; }
+	return true;
+}
+
+static bool read_s64(FILE *f, s64 *out) {
+	u64 v;
+	if (!read_u64(f, &v)) { return false; }
+	if (out) { *out = (s64)v; }
+	return true;
+}
+
+static bool write_str(FILE *f, const char *s){
+	if(!f){return false;}
+	u64 len = s ? strlen(s) : 0;
+	if(len > UINT32_MAX){
+		GILD_LOG(GILD_INVALID_ARG, "String too long to write (%llu bytes)", (unsigned long long)len);
+		return false;
+	}
+	return write_u32(f, (u32)len) && write_bytes(f, s, (size_t)len);
+}
+
+static bool read_str(FILE *f, char **out, u32 max_len){
+	if(!f || !out){return false;}
+	u32 len;
+	if(!read_u32(f, &len)){return false;}
+	if(len == 0){*out = NULL; return true;}
+	if(len > max_len){
+		GILD_LOG(GILD_CORRUPT, "Stored string length %u is over the limit of %u", len, max_len);
+		return false;
+	}
+	char *s = GILD_XMALLOC(gild_safe_add((size_t)len, (size_t)1));
+	if(!read_bytes(f, s, len)){
+		free(s);
+		return false;
+	}
+	s[len] = '\0';
+	*out = s;
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Read-or-write with a sticky error flag, see gild_io.h. These are the only way in
+// from outside this file.
+// ---------------------------------------------------------------------------
+
+struct Gild_IO gild_io_begin(FILE *f, bool writing){
+	if(!f){GILD_LOG(GILD_IS_NULL, "Passed NULL file to gild_io_begin");}
+	struct Gild_IO io = {f, writing, f != NULL};
+	return io;
+}
+
+bool gild_io_end(struct Gild_IO *io){
+	if(!io){GILD_LOG(GILD_IS_NULL, "Passed NULL io to gild_io_end"); return false;}
+	if(io->ok && io->writing && (fflush(io->f) != 0 || ferror(io->f))){
+		GILD_LOG(GILD_WRITE, "Failed to flush file (disk full?)");
+		io->ok = false;
+	}
+	return io->ok;
+}
+
+// False if an earlier call already failed. A missing argument is a bug in the caller,
+// so it's logged and fails the io too.
+static bool io_ready(struct Gild_IO *io, bool args_ok){
+	if(!io){GILD_LOG(GILD_IS_NULL, "Passed NULL io"); return false;}
+	if(!io->ok){return false;}
+	if(!args_ok){GILD_LOG(GILD_IS_NULL, "Passed NULL value to gild_io"); io->ok = false; return false;}
+	return true;
+}
+
+bool gild_io_header(struct Gild_IO *io, const char mag[8], u32 *version, u64 *timestamp){
+	if(!io_ready(io, mag != NULL && version != NULL)){return false;}
+
+	if(io->writing){
+		u64 now = (u64)time(NULL);
+		// Magic is written byte-for-byte, so it reads back the same on any host.
+		io->ok = write_bytes(io->f, mag, 8) && write_u64(io->f, now) && write_u32(io->f, *version);
+		if(!io->ok){GILD_LOG(GILD_WRITE, "Failed to write header"); return false;}
+		if(timestamp){*timestamp = now;}
 		return true;
 	}
-	GILD_LOG(GILD_WRITE, "Failed to write header");
-	return false;
-}
-bool gild_read_header(FILE *f, const char mag[8], u32 version){
-	if(!f || !mag){return false;}
 
 	char got_mag[8];
-	u64 timestamp;
+	u64 when;
 	u32 ver;
-
-	if(!(gild_read_bytes(f, got_mag, 8) && gild_read_u64(f, &timestamp) && gild_read_u32(f, &ver))){
-		GILD_LOG(GILD_READ, "Failed to read header");
+	io->ok = read_bytes(io->f, got_mag, 8) && read_u64(io->f, &when) && read_u32(io->f, &ver);
+	if(!io->ok){GILD_LOG(GILD_READ, "Failed to read header"); return false;}
+	if(memcmp(got_mag, mag, 8) != 0){
+		GILD_LOG(GILD_READ, "Wrong magic number");
+		io->ok = false;
 		return false;
 	}
-	if(memcmp(got_mag, mag, 8) != 0){GILD_LOG(GILD_READ, "Wrong magic number"); return false;}
-	if(ver != version){
-		GILD_LOG(GILD_VERSION_MISMATCH, "Wrong version (file %u, expected %u)", ver, version);
-		return false;
-	}
+	*version = ver;
+	if(timestamp){*timestamp = when;}
 	return true;
+}
+
+// The eight integer versions are identical apart from the type, so they're stamped
+// out here rather than copy-pasted (a copy-paste slip like calling write_u16 inside
+// gild_io_u32 would be easy to miss).
+#define GILD_IO_INT(T) \
+	bool gild_io_##T(struct Gild_IO *io, T *v){ \
+		if(!io_ready(io, v != NULL)){return false;} \
+		io->ok = io->writing ? write_##T(io->f, *v) : read_##T(io->f, v); \
+		return io->ok; \
+	}
+GILD_IO_INT(u8)
+GILD_IO_INT(u16)
+GILD_IO_INT(u32)
+GILD_IO_INT(u64)
+GILD_IO_INT(s8)
+GILD_IO_INT(s16)
+GILD_IO_INT(s32)
+GILD_IO_INT(s64)
+#undef GILD_IO_INT
+
+bool gild_io_bytes(struct Gild_IO *io, void *buf, size_t n){
+	if(!io_ready(io, buf != NULL || n == 0)){return false;}
+	io->ok = io->writing ? write_bytes(io->f, buf, n) : read_bytes(io->f, buf, n);
+	return io->ok;
+}
+
+bool gild_io_str(struct Gild_IO *io, char **s, u32 max_len){
+	if(!io_ready(io, s != NULL)){return false;}
+	io->ok = io->writing ? write_str(io->f, *s) : read_str(io->f, s, max_len);
+	return io->ok;
 }
 
 // Strips leading space/tab and trailing space/tab/CR, in place.
@@ -242,165 +464,4 @@ bool gild_parent_dir_exists(const char *path){
 	bool exists = is_directory(buf);
 	free(buf);
 	return exists;
-}
-bool gild_write_bytes(FILE *f, const void *buf, size_t n) {
-	if (!f || (n > 0 && !buf)) { return false; }
-	return (n == 0 || fwrite(buf, 1, n, f) == n) ? true : false;
-}
-
-bool gild_read_bytes(FILE *f, void *buf, size_t n) {
-	if (!f || (n > 0 && !buf)) { return false; }
-	return (n == 0 || fread(buf, 1, n, f) == n) ? true : false;
-}
-
-bool gild_write_str(FILE *f, const char *s){
-	if(!f){return false;}
-	u64 len = s ? strlen(s) : 0;
-	if(len > UINT32_MAX){
-		GILD_LOG(GILD_INVALID_ARG, "String too long to write (%llu bytes)", (unsigned long long)len);
-		return false;
-	}
-	return gild_write_u32(f, (u32)len) && gild_write_bytes(f, s, (size_t)len);
-}
-
-bool gild_read_str(FILE *f, char **out, u32 max_len){
-	if(!f || !out){return false;}
-	u32 len;
-	if(!gild_read_u32(f, &len)){return false;}
-	if(len == 0){*out = NULL; return true;}
-	if(len > max_len){
-		GILD_LOG(GILD_CORRUPT, "Stored string length %u is over the limit of %u", len, max_len);
-		return false;
-	}
-	char *s = GILD_XMALLOC(gild_safe_add((size_t)len, (size_t)1));
-	if(!gild_read_bytes(f, s, len)){
-		free(s);
-		return false;
-	}
-	s[len] = '\0';
-	*out = s;
-	return true;
-}
-
-bool gild_write_u8(FILE *f, u8 v) {
-	if (!f) { return false; }
-	return fwrite(&v, 1, 1, f) == 1 ? true : false;
-}
-
-bool gild_write_u16(FILE *f, u16 v) {
-	if (!f) { return false; }
-	u8 b[2] = {
-		(u8)(v & 0xFF),
-		(u8)((v >> 8) & 0xFF)
-	};
-	return fwrite(b, 1, 2, f) == 2 ? true : false;
-}
-
-bool gild_write_u32(FILE *f, u32 v) {
-	if (!f) { return false; }
-	u8 b[4] = {
-		(u8)(v & 0xFF),
-		(u8)((v >> 8)  & 0xFF),
-		(u8)((v >> 16) & 0xFF),
-		(u8)((v >> 24) & 0xFF)
-	};
-	return fwrite(b, 1, 4, f) == 4 ? true : false;
-}
-
-bool gild_write_u64(FILE *f, u64 v) {
-	if (!f) { return false; }
-	u8 b[8] = {
-		(u8)(v & 0xFF),
-		(u8)((v >> 8)  & 0xFF),
-		(u8)((v >> 16) & 0xFF),
-		(u8)((v >> 24) & 0xFF),
-		(u8)((v >> 32) & 0xFF),
-		(u8)((v >> 40) & 0xFF),
-		(u8)((v >> 48) & 0xFF),
-		(u8)((v >> 56) & 0xFF)
-	};
-	return fwrite(b, 1, 8, f) == 8 ? true : false;
-}
-
-bool gild_write_s8(FILE *f, s8 v) {
-	return gild_write_u8(f, (u8)v);
-}
-
-bool gild_write_s16(FILE *f, s16 v) {
-	return gild_write_u16(f, (u16)v);
-}
-
-bool gild_write_s32(FILE *f, s32 v) {
-	return gild_write_u32(f, (u32)v);
-}
-
-bool gild_write_s64(FILE *f, s64 v) {
-	return gild_write_u64(f, (u64)v);
-}
-
-bool gild_read_u8(FILE *f, u8 *out) {
-	if (!f || !out) { return false; }
-	return fread(out, 1, 1, f) == 1 ? true : false;
-}
-
-bool gild_read_u16(FILE *f, u16 *out) {
-	u8 b[2];
-	if (!f || !out) { return false; }
-	if (fread(b, 1, 2, f) != 2) { return false; }
-	*out = (u16)((u16)b[0] | ((u16)b[1] << 8));
-	return true;
-}
-
-bool gild_read_u32(FILE *f, u32 *out) {
-	u8 b[4];
-	if (!f || !out) { return false; }
-	if (fread(b, 1, 4, f) != 4) { return false; }
-	*out = (u32)b[0]
-	     | ((u32)b[1] << 8)
-	     | ((u32)b[2] << 16)
-	     | ((u32)b[3] << 24);
-	return true;
-}
-
-bool gild_read_u64(FILE *f, u64 *out) {
-	u8 b[8];
-	if (!f || !out) { return false; }
-	if (fread(b, 1, 8, f) != 8) { return false; }
-	*out = (u64)b[0]
-	     | ((u64)b[1] << 8)
-	     | ((u64)b[2] << 16)
-	     | ((u64)b[3] << 24)
-	     | ((u64)b[4] << 32)
-	     | ((u64)b[5] << 40)
-	     | ((u64)b[6] << 48)
-	     | ((u64)b[7] << 56);
-	return true;
-}
-
-bool gild_read_s8(FILE *f, s8 *out) {
-	u8 v;
-	if (!gild_read_u8(f, &v)) { return false; }
-	if (out) { *out = (s8)v; }
-	return true;
-}
-
-bool gild_read_s16(FILE *f, s16 *out) {
-	u16 v;
-	if (!gild_read_u16(f, &v)) { return false; }
-	if (out) { *out = (s16)v; }
-	return true;
-}
-
-bool gild_read_s32(FILE *f, s32 *out) {
-	u32 v;
-	if (!gild_read_u32(f, &v)) { return false; }
-	if (out) { *out = (s32)v; }
-	return true;
-}
-
-bool gild_read_s64(FILE *f, s64 *out) {
-	u64 v;
-	if (!gild_read_u64(f, &v)) { return false; }
-	if (out) { *out = (s64)v; }
-	return true;
 }

@@ -168,15 +168,15 @@ static void delete_transition_at(s32 tx, s32 ty){
 	dirty = true;
 }
 
-static bool entity_on_tile(const struct MapEntity *e, s32 tx, s32 ty){
+static bool entity_on_tile(const struct Entity *e, s32 tx, s32 ty){
 	s32 etx, ety;
 	map_world_to_tile(&m, (float)e->pos.x, (float)e->pos.y, &etx, &ety);
 	return etx == tx && ety == ty;
 }
 
 static bool uid_used(u32 uid){
-	for(u16 i = 0; i < m.entity_count; i++){
-		if(m.entities[i].uid == uid){return true;}
+	for(u16 i = 0; i < m.entities.count; i++){
+		if(m.entities.items[i].uid == uid){return true;}
 	}
 	return false;
 }
@@ -199,10 +199,13 @@ static void add_entity(s32 tx, s32 ty){
 		if(!auto_uid){set_status("UID %u is already used", uid); return;}
 		if(!next_free_uid(uid, &uid)){set_status("No free UID above %lu", typed); return;}
 	}
-	if(m.entity_count == UINT16_MAX){set_status("Too many entities"); return;}
+	if(m.entities.count == UINT16_MAX){set_status("Too many entities"); return;}
 
-	m.entities = GILD_XREALLOC(m.entities, ((size_t)m.entity_count + 1) * sizeof(struct MapEntity));
-	struct MapEntity *e = &m.entities[m.entity_count++];
+	m.entities.items = GILD_XREALLOC(m.entities.items, ((size_t)m.entities.count + 1) * sizeof(struct Entity));
+	struct Entity *e = &m.entities.items[m.entities.count++];
+	// Stats, inventory, level and flags stay zeroed with initialised false: the game
+	// fills them from the prototype the first time it loads the map.
+	memset(e, 0, sizeof(*e));
 	e->prototype = proto_buf[0] ? gild_copy_alloc_str(proto_buf, strlen(proto_buf)) : NULL;
 	e->type = (enum MapEntityType)ent_type;
 	e->uid = uid;
@@ -220,19 +223,19 @@ static void add_entity(s32 tx, s32 ty){
 
 // Deletes the front-most entity on the tile.
 static void delete_entity_at(s32 tx, s32 ty){
-	for(int i = (int)m.entity_count - 1; i >= 0; i--){
-		if(!entity_on_tile(&m.entities[i], tx, ty)){continue;}
-		free((void *)m.entities[i].prototype);
-		memmove(&m.entities[i], &m.entities[i + 1], (size_t)(m.entity_count - i - 1) * sizeof(struct MapEntity));
-		m.entity_count--;
-		if(m.entity_count == 0){free(m.entities); m.entities = NULL;}
+	for(int i = (int)m.entities.count - 1; i >= 0; i--){
+		if(!entity_on_tile(&m.entities.items[i], tx, ty)){continue;}
+		free((void *)m.entities.items[i].prototype);
+		memmove(&m.entities.items[i], &m.entities.items[i + 1], (size_t)(m.entities.count - i - 1) * sizeof(struct Entity));
+		m.entities.count--;
+		if(m.entities.count == 0){free(m.entities.items); m.entities.items = NULL;}
 		dirty = true;
 		return;
 	}
 }
 
 static void save(void){
-	if(write_map(&m, map_path) && write_map_entities(&m, ent_path)){
+	if(write_map(&m, map_path) && write_map_entities(&m.entities, ent_path)){
 		dirty = false;
 		set_status("Saved %s", GetFileName(map_path));
 	} else {
@@ -252,7 +255,7 @@ bool init_editor(const char *path, u16 w, u16 h){
 	if(!ent_path){return false;}
 
 	if(w == 0 || h == 0){
-		if(!read_map(&m, map_path) || !read_map_entities(&m, ent_path)){
+		if(!read_map(&m, map_path) || !read_map_entities(&m.entities, ent_path)){
 			free_map(&m);
 			free(ent_path); ent_path = NULL;
 			return false;
@@ -423,9 +426,9 @@ static void draw_overlays(void){
 	}
 	if(tool == TOOL_ENTITY){
 		// Entities whose texture is missing would otherwise be invisible.
-		for(u16 i = 0; i < m.entity_count; i++){
+		for(u16 i = 0; i < m.entities.count; i++){
 			s32 tx, ty;
-			map_world_to_tile(&m, (float)m.entities[i].pos.x, (float)m.entities[i].pos.y, &tx, &ty);
+			map_world_to_tile(&m, (float)m.entities.items[i].pos.x, (float)m.entities.items[i].pos.y, &tx, &ty);
 			outline_tiles(tx, ty, tx, ty, GREEN);
 		}
 	}
@@ -510,7 +513,7 @@ static void draw_panel(void){
 	GuiLabel((Rectangle){x, y, w, 20}, hover_in ? TextFormat("Tile %d, %d", hover_tx, hover_ty) : "Tile -");
 	y += 20;
 	GuiLabel((Rectangle){x, y, w, 20}, TextFormat("%u entities, %u ceilings, %u exits",
-	         (u32)m.entity_count, (u32)m.ceiling_count, (u32)m.transition_count));
+	         (u32)m.entities.count, (u32)m.ceiling_count, (u32)m.transition_count));
 	y += ROW;
 	GuiLabel((Rectangle){x, y, w, 20}, "LMB place   RMB erase");
 	y += 18;
