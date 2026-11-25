@@ -8,7 +8,7 @@ struct SaveFile{
 };
 
 struct Map;
-
+bool create_new_savefile();
 bool serialize_save_file(struct SaveFile *s, u32 save_id, bool write);
 bool save_from(u32 id);
 bool load_from(u32 id);

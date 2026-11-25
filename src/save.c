@@ -12,8 +12,15 @@
 #define SAVE_VERSION 1
 #define SAVE_MAGIC "SAVEEPIC"
 #define SAVE_PATH "data/save_file/"
+#define INSTANCE_COUNT 64
 
 static struct SaveFile active_save = {0};
+bool create_new_savefile(){
+	clear_save_file();
+	active_save.instance_versions = GILD_XCALLOC(INSTANCE_COUNT, sizeof(u32));
+	active_save.instance_count = INSTANCE_COUNT;
+	return true;
+}
 bool instance_from_save(struct Map *m){
 	if(!active_save.instance_versions || !m){return false;}
 	u32 *indexes = GILD_XCALLOC(m->character_count, sizeof(u32));
