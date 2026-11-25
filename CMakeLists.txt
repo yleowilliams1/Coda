@@ -43,17 +43,13 @@ set(GILD_SOURCES
 add_executable(app
 	${GILD_SOURCES}
 	src/camera.c
-	src/cli.c
+	src/character.c
 	src/dialogue.c
-	src/editor.c
-	src/entity.c
 	src/flag.c
-	src/game.c
-	src/inventory.c
+	src/instance.c
 	src/main.c
-	src/map.c
+	src/proto.c
 	src/save.c
-	src/stats.c
 )
 
 target_include_directories(app PRIVATE
