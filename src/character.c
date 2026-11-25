@@ -301,7 +301,7 @@ bool add_item(struct CharacterInstance *c, u32 item, u32 count){
 	if(!c){return false;}
 	const struct ItemPrototype *proto = get_item_proto(item);
 	if(!proto){return false;}
-	u64 max = (u64)proto->max_stack;
+	s8 max = proto->max_stack;
 
 	int empty = -1;
 	for(int i = 0; i < INVENTORY_SIZE; i++){
@@ -311,12 +311,12 @@ bool add_item(struct CharacterInstance *c, u32 item, u32 count){
 			continue;
 		}
 		if(s->item_uid == item){
-			if((u64)s->stack_count + count > max){return false;} // would go over max_stack
+			if((s64)s->stack_count + count > (s64)max){return false;} // would go over max_stack
 			s->stack_count += count;
 			return true;
 		}
 	}
-	if(empty < 0 || count > max){return false;} // inventory full, or too many for one stack
+	if(empty < 0 || count > (s64)max){return false;} // inventory full, or too many for one stack
 	c->inventory[empty].item_uid = item;
 	c->inventory[empty].stack_count = count;
 	return true;
@@ -363,6 +363,8 @@ bool serialize_character(struct CharacterInstance *c, bool write){
 	if(!c){GILD_LOG(GILD_IS_NULL, "Passed NULL character"); return false;}
 
 	char path[512];
+	
+	if(write){c->save_counter++;}
 	if(!character_save_path(c->unique_id, c->save_counter, path, sizeof(path))){return false;}
 
 	// Saving reads straight from c. Loading fills a blank copy, and c only changes
@@ -382,7 +384,6 @@ bool serialize_character(struct CharacterInstance *c, bool write){
 	}
 
 	gild_io_u32(&io, &t->unique_id);
-	if(write){t->save_counter++;}
 	gild_io_u32(&io, &t->save_counter);
 	
 	gild_io_u32(&io, &t->prototype_id);

@@ -14,13 +14,13 @@
 #define SAVE_PATH "data/save_file/"
 
 static struct SaveFile active_save = {0};
-// Do indiviudal bounds check
 bool instance_from_save(struct Map *m){
 	if(!active_save.instance_versions || !m){return false;}
 	u32 *indexes = GILD_XCALLOC(m->character_count, sizeof(u32));
 	u32 *versions = GILD_XCALLOC(m->character_count, sizeof(u32));
 
 	for(int i = 0; i < (int)m->character_count; i++){
+		if(m->characters[i].uid >= active_save.instance_count){continue;}
 		indexes[i] = m->characters[i].uid;
 		if(active_save.instance_versions[m->characters[i].uid] > m->characters[i].save_index){
 			versions[i] = active_save.instance_versions[m->characters[i].uid];
@@ -42,12 +42,13 @@ bool save_from(u32 id){
 	for(int i = 0; i < (int)list.instance_count; i++){
 		active_save.instance_versions[list.indexs[i]] = list.versions[i];
 	}
+	free(list.indexs);
+	free(list.versions);
 	return serialize_save_file(&active_save, id, true);
-	
 }
 bool load_from(u32 id){
 	clear_save_file();
-	return serialize_save_file(&active_save, id, true);
+	return serialize_save_file(&active_save, id, false);
 }
 bool clear_save_file(){
 	if(active_save.instance_versions){free(active_save.instance_versions); active_save.instance_versions = NULL;}
@@ -67,12 +68,11 @@ bool serialize_save_file(struct SaveFile *s, u32 save_id, bool write){
 
 	struct Gild_IO io = gild_io_begin(f, write);
 	u32 ver = SAVE_VERSION;
-	gild_io_header(&io, SAVE_PATH, &ver, NULL);
+	gild_io_header(&io, SAVE_MAGIC, &ver, NULL);
 	if(ver != SAVE_VERSION){ 
-		GILD_LOG(GILD_VERSION_MISMATCH, "%s is version %u, expected %u", path, ver, SAVE_MAGIC); 
+		GILD_LOG(GILD_VERSION_MISMATCH, "%s is version %u, expected %u", path, ver, SAVE_VERSION); 
 		io.ok = false;
 	}
-
 	gild_io_u32(&io, &t->flag_version);
 	gild_io_u32(&io, &t->instance_count);
 	if(!write && io.ok){
