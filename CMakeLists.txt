@@ -36,6 +36,7 @@ set(GILD_SOURCES
 	src/util/gild_log.c
 	src/util/gild_mem.c
 	src/util/gild_math.c
+	src/util/gild_rand.c
 	src/util/gild_string.c
 	src/util/gild_window.c
 )

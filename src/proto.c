@@ -23,16 +23,22 @@
 
 static struct ItemPrototype *iproto = NULL;
 static struct CharacterPrototype *cproto = NULL;
+static bool cproto_loaded[CHARACTER_PROTO_COUNT]; // false: no file, the slot is all zeroes
 
 static void cproto_parse(const struct Gild_ConfigPack *pack, void *ptr);
 static void iproto_parse(const struct Gild_ConfigPack *pack, void *ptr);
+
+// NULL for an id with no prototype (out of range, no file, or no name), so callers
+// can tell. It used to fall back to item 0, which made every NULL check dead and let
+// an unknown id act as item 0.
 const struct ItemPrototype *get_item_proto(u32 id){
-	if(!iproto || id >= ITEM_PROTO_COUNT || !iproto[id].name){return &iproto[0];}
+	if(!iproto || id >= ITEM_PROTO_COUNT || !iproto[id].name){return NULL;}
 	return &iproto[id];
 }
 
+// NULL for an id with no prototype (out of range or no file).
 const struct CharacterPrototype *get_character_proto(u32 id){
-	if(!cproto || id >= CHARACTER_PROTO_COUNT){return &cproto[0];}
+	if(!cproto || id >= CHARACTER_PROTO_COUNT || !cproto_loaded[id]){return NULL;}
 	return &cproto[id];
 }
 void load_item_proto(){
@@ -64,6 +70,7 @@ void load_character_proto(){
 	if(cproto){free(cproto); cproto = NULL;}
 	cproto = GILD_XCALLOC(CHARACTER_PROTO_COUNT, sizeof(struct CharacterPrototype));
 	for(int i = 0; i < CHARACTER_PROTO_COUNT; i++){
+		cproto_loaded[i] = false;
 		char *path = gild_format_path(CHARACTER_PROTO_PATH, "ini", i);
 		if(!FileExists(path)){
 			GILD_LOG(GILD_NO_FILE, "No file %s", path);
@@ -71,7 +78,7 @@ void load_character_proto(){
 			cproto[i].sprite_w = 1;
 			cproto[i].sprite_h = 1;
 
-			gild_config(&cproto[i], path, cproto_parse);
+			cproto_loaded[i] = gild_config(&cproto[i], path, cproto_parse);
 
 			#define X(name) if(cproto[i].stat[ST_##name] == 0){GILD_LOG(GILD_PARSE, "%s: %s is missing or invalid", path, #name);}
 			STAT_LIST
@@ -83,7 +90,7 @@ void load_character_proto(){
 
 // Parse helpers. Each logs its own error, naming the key and the bad value.
 
-// Case-insensitive, so "Strength", "strength" and "STRENGTH" all match.
+// Case-insensitive, so "Power", "power" and "POWER" all match.
 static bool matches(const char *a, const char *b){
 	while(*a && *b){
 		if(tolower((unsigned char)*a) != tolower((unsigned char)*b)){return false;}
@@ -127,7 +134,7 @@ static bool read_rect_s16(const struct Gild_ConfigPack *pack, gild_rec_s16 *out)
 	return true;
 }
 
-// Skill names come from SKILLS_LIST, so "melee" is SK_MELEE. "none" means no skill.
+// Skill names come from SKILL_LIST, so "melee" is ST_Melee. "none" means no skill.
 static bool read_skill(const struct Gild_ConfigPack *pack, u8 *out){
 	if(matches(pack->value, "none")){*out = ITEM_NO_SKILL; return true;}
 	#define X(name) if(matches(pack->value, #name)){*out = ST_##name; return true;}
@@ -148,7 +155,7 @@ static void read_str(char **dst, const char *value){
 // ---------------------------------------------------------------------------
 
 // data/proto/characters/<id>.ini
-//   strength = 6          (all eight stats, 1 to 20)
+//   power = 6             (all eight stats from STAT_LIST, 1 to 20)
 //   agility = 12
 //   ...
 //   collision = 0 0 32 48
@@ -160,7 +167,7 @@ static void cproto_parse(const struct Gild_ConfigPack *pack, void *ptr){
 	const char *k = pack->key;
 	long long v;
 
-	// Stats: the key is the stat's name from STATS_LIST, e.g. "strength = 6".
+	// Stats: the key is the stat's name from STAT_LIST, e.g. "power = 6".
 	#define X(name) \
 		if(matches(k, #name)){ \
 			if(read_int(pack, PROTO_STAT_MIN, PROTO_STAT_MAX, &v)){p->stat[ST_##name] = (s8)v;} \
@@ -173,11 +180,12 @@ static void cproto_parse(const struct Gild_ConfigPack *pack, void *ptr){
 	else if(matches(k, "sprite_index")){
 		if(read_int(pack, 0, UINT32_MAX, &v)){p->sprite_index = (u32)v;}
 	}
+	// sprite_w/h are u8: anything over 255 used to wrap (300 became 44).
 	else if(matches(k, "sprite_w")){
-		if(read_int(pack, 1, UINT32_MAX, &v)){p->sprite_w = (u32)v;}
+		if(read_int(pack, 1, UINT8_MAX, &v)){p->sprite_w = (u8)v;}
 	}
 	else if(matches(k, "sprite_h")){
-		if(read_int(pack, 1, UINT32_MAX, &v)){p->sprite_h = (u32)v;}
+		if(read_int(pack, 1, UINT8_MAX, &v)){p->sprite_h = (u8)v;}
 	}
 	else{
 		GILD_LOG(GILD_IGNORED, "Unknown character key '%s' ignored", k); // usually a typo
@@ -188,7 +196,7 @@ static void cproto_parse(const struct Gild_ConfigPack *pack, void *ptr){
 //   name = Dagger
 //   description = A shiny dagger. Please don't eat.
 //   value = 5
-//   effective_skill = melee      (a name from SKILLS_LIST, or none)
+//   effective_skill = melee      (a name from SKILL_LIST, or none)
 //   use_health_mod_min = -6
 //   use_health_mod_max = -2
 //   AC = 0

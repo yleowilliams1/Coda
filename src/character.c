@@ -297,75 +297,127 @@ bool free_character(struct CharacterInstance *c){
 	memset(c, 0, sizeof(*c));
 	return true;
 }
-bool add_item(struct CharacterInstance *c, u32 item, u32 count){
-	if(!c){return false;}
-	const struct ItemPrototype *proto = get_item_proto(item);
-	if(!proto){return false;}
-	s8 max = proto->max_stack;
-
-	int empty = -1;
+// Items in the inventory, across every stack.
+static u32 inventory_count(const struct CharacterInstance *c, u32 item){
+	u64 total = 0;
 	for(int i = 0; i < INVENTORY_SIZE; i++){
-		struct ItemStack *s = &c->inventory[i];
-		if(s->stack_count == 0){
-			if(empty < 0){empty = i;}
-			continue;
-		}
-		if(s->item_uid == item){
-			if((s64)s->stack_count + count > (s64)max){return false;} // would go over max_stack
-			s->stack_count += count;
-			return true;
-		}
+		if(c->inventory[i].stack_count > 0 && c->inventory[i].item_uid == item){total += c->inventory[i].stack_count;}
 	}
-	if(empty < 0 || count > (s64)max){return false;} // inventory full, or too many for one stack
-	c->inventory[empty].item_uid = item;
-	c->inventory[empty].stack_count = count;
-	return true;
+	return total > UINT32_MAX ? UINT32_MAX : (u32)total;
 }
-bool remove_item(struct CharacterInstance *c, u32 item, u32 count){
-	if(!c){return false;}
-	for(int i = 0; i < INVENTORY_SIZE; i++){
-		if(c->inventory[i].stack_count > 0 && c->inventory[i].item_uid == item){
-			if(c->inventory[i].stack_count < count){
-				c->inventory[i].stack_count = 0;
-				return true;
-			}
-			c->inventory[i].stack_count -= count;
-			return true;
-		}
+static bool is_equipped(const struct CharacterInstance *c, u32 item){
+	for(int i = 0; i < HOTBAR_SIZE; i++){
+		if(c->hotbar[i].stack_count > 0 && c->hotbar[i].item_uid == item){return true;}
 	}
 	return false;
 }
+
+// All or nothing: tops up existing stacks first, then fills empty slots. Returns
+// false (and changes nothing) if the whole count doesn't fit.
+bool add_item(struct CharacterInstance *c, u32 item, u32 count){
+	if(!c){GILD_LOG(GILD_IS_NULL, "Character instance is NULL"); return false;}
+	if(count == 0){return true;}
+	const struct ItemPrototype *proto = get_item_proto(item);
+	if(!proto){GILD_LOG(GILD_NOT_FOUND, "No item prototype %u", item); return false;}
+	u32 max = proto->max_stack > 0 ? (u32)proto->max_stack : 1u;
+
+	// First pass: is there room?
+	u64 room = 0;
+	for(int i = 0; i < INVENTORY_SIZE; i++){
+		const struct ItemStack *s = &c->inventory[i];
+		if(s->stack_count == 0){room += max;}
+		else if(s->item_uid == item && s->stack_count < max){room += max - s->stack_count;}
+	}
+	if(room < count){return false;}
+
+	// Second pass: place it.
+	u32 left = count;
+	for(int i = 0; i < INVENTORY_SIZE && left > 0; i++){
+		struct ItemStack *s = &c->inventory[i];
+		if(s->stack_count > 0 && s->item_uid == item && s->stack_count < max){
+			u32 add = max - s->stack_count < left ? max - s->stack_count : left;
+			s->stack_count += add;
+			left -= add;
+		}
+	}
+	for(int i = 0; i < INVENTORY_SIZE && left > 0; i++){
+		struct ItemStack *s = &c->inventory[i];
+		if(s->stack_count == 0){
+			u32 add = max < left ? max : left;
+			s->item_uid = item;
+			s->stack_count = add;
+			left -= add;
+		}
+	}
+	return true;
+}
+
+// All or nothing: false (and changes nothing) if the inventory holds fewer than
+// count. Takes from the last stacks first so the earlier ones stay full.
+// Only touches the inventory; an equipped item is on the hotbar, not in here.
+bool remove_item(struct CharacterInstance *c, u32 item, u32 count){
+	if(!c){GILD_LOG(GILD_IS_NULL, "Character instance is NULL"); return false;}
+	if(count == 0){return true;}
+	if(inventory_count(c, item) < count){return false;}
+
+	u32 left = count;
+	for(int i = INVENTORY_SIZE - 1; i >= 0 && left > 0; i--){
+		struct ItemStack *s = &c->inventory[i];
+		if(s->stack_count == 0 || s->item_uid != item){continue;}
+		u32 take = s->stack_count < left ? s->stack_count : left;
+		s->stack_count -= take;
+		left -= take;
+	}
+	return true;
+}
+
+// Moves one of the item from the inventory to a free hotbar slot. Fails if the
+// character doesn't have one, already has one equipped, or the hotbar is full.
 bool equip_item(struct CharacterInstance *c, u32 item){
-	if(!c){return false;}
-	for(int i = 0 ; i < HOTBAR_SIZE; i++){
+	if(!c){GILD_LOG(GILD_IS_NULL, "Character instance is NULL"); return false;}
+	if(!get_item_proto(item)){GILD_LOG(GILD_NOT_FOUND, "No item prototype %u", item); return false;}
+	if(is_equipped(c, item)){return false;} // one of each item at a time
+	if(inventory_count(c, item) == 0){return false;}
+
+	for(int i = 0; i < HOTBAR_SIZE; i++){
 		if(c->hotbar[i].stack_count == 0){
+			remove_item(c, item, 1); // can't fail: counted above
 			c->hotbar[i].item_uid = item;
 			c->hotbar[i].stack_count = 1;
 			return true;
 		}
 	}
-	return false;
+	return false; // hotbar full
 }
+
+// Moves the item from the hotbar back into the inventory. Fails (and stays
+// equipped) if it isn't equipped or the inventory has no room for it.
 bool unequip_item(struct CharacterInstance *c, u32 item){
-	if(!c){return false;}
-	bool found = false;
-	for(int i = 0 ; i < HOTBAR_SIZE; i++){
-		if(c->hotbar[i].stack_count > 0 && c->hotbar[i].item_uid == item){
-			c->hotbar[i].stack_count = 0;
-			found = true;
-		}
+	if(!c){GILD_LOG(GILD_IS_NULL, "Character instance is NULL"); return false;}
+	for(int i = 0; i < HOTBAR_SIZE; i++){
+		struct ItemStack *s = &c->hotbar[i];
+		if(s->stack_count == 0 || s->item_uid != item){continue;}
+		if(!add_item(c, item, s->stack_count)){return false;}
+		s->stack_count = 0;
+		return true;
 	}
-	return found;
+	return false;
 }
 
 
 bool serialize_character(struct CharacterInstance *c, bool write){
 	if(!c){GILD_LOG(GILD_IS_NULL, "Passed NULL character"); return false;}
 
+	// Writing goes to the next version. c->save_counter only moves to it once the file
+	// has written cleanly, so a failed save leaves c pointing at its last good file.
+	if(write && c->save_counter == UINT32_MAX){
+		GILD_LOG(GILD_OVERFLOW, "Character %u has run out of save versions", c->unique_id);
+		return false;
+	}
+	u32 counter = write ? c->save_counter + 1 : c->save_counter;
+
 	char path[512];
-	
-	if(write){c->save_counter++;}
-	if(!character_save_path(c->unique_id, c->save_counter, path, sizeof(path))){return false;}
+	if(!character_save_path(c->unique_id, counter, path, sizeof(path))){return false;}
 
 	// Saving reads straight from c. Loading fills a blank copy, and c only changes
 	// once the whole file has read cleanly.
@@ -384,8 +436,11 @@ bool serialize_character(struct CharacterInstance *c, bool write){
 	}
 
 	gild_io_u32(&io, &t->unique_id);
-	gild_io_u32(&io, &t->save_counter);
-	
+	// Writing stores the new counter; reading fills tmp.save_counter.
+	u32 file_counter = counter;
+	gild_io_u32(&io, &file_counter);
+	if(!write){tmp.save_counter = file_counter;}
+
 	gild_io_u32(&io, &t->prototype_id);
 
 	gild_io_u32(&io, &t->current_map);
@@ -420,8 +475,9 @@ bool serialize_character(struct CharacterInstance *c, bool write){
 	if(fclose(f) != 0){ok = false;}
 
 	if(write){
-		if(!ok){remove(path);} // don't leave a half-written save behind
-		return ok;
+		if(!ok){remove(path); return false;} // don't leave a half-written save behind
+		c->save_counter = counter;
+		return true;
 	}
 	if(!ok){return false;}
 
