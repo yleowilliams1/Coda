@@ -22,7 +22,7 @@ static const s32 NB_COST[8] = { D_DIAG, D_DIAG, D_DIAG, D_DIAG, D_ORTHO, D_ORTHO
 
 static bool in_bounds_u32(u32 w, u32 h, u32 x, u32 y);
 static bool in_bounds_signed(u32 w, u32 h, int x, int y);
-static bool collide(u8 v) { return (v & 1) != 0; }
+static bool collide(u8 v, u8 mask) { return (v & mask) != 0; }
 static u32 v2_idx(u32 x, u32 y, u32 w);
 
 struct Heap {
@@ -53,6 +53,13 @@ bool gild_pathfind(
 		u8 *m, u32 w, u32 h,
 		gild_v2_u32 start, gild_v2_u32 target,
 		struct Gild_AstarPath *out) {
+	return gild_pathfind_mask(m, w, h, start, target, 1u, out);
+}
+
+bool gild_pathfind_mask(
+		u8 *m, u32 w, u32 h,
+		gild_v2_u32 start, gild_v2_u32 target, u8 block_mask,
+		struct Gild_AstarPath *out) {
 	if (!m) {
 		GILD_LOG(GILD_IS_NULL, "Map is NULL");
 		return false;
@@ -64,7 +71,7 @@ bool gild_pathfind(
 		GILD_LOG(GILD_OUT_OF_BOUNDS, "Start or goal is out of map bounds");
 		return false;
 	}
-	if (collide(m[v2_idx(target.x, target.y, w)])) {
+	if (collide(m[v2_idx(target.x, target.y, w)], block_mask)) {
 		return false;
 	}
 	if (start.x == target.x && start.y == target.y) {
@@ -116,7 +123,7 @@ bool gild_pathfind(
 			u32 unx = (u32)nx;
 			u32 uny = (u32)ny;
 			u8 tile = m[v2_idx(unx, uny, w)];
-			if (collide(tile)) {
+			if (collide(tile, block_mask)) {
 				continue;
 			}
 
@@ -127,7 +134,7 @@ bool gild_pathfind(
 				u32 adj2_x = (u32)cx;
 				u32 adj2_y = (u32)(cy + NB_DY[dir]);
 
-				if (collide(m[v2_idx(adj1_x, adj1_y, w)]) || collide(m[v2_idx(adj2_x, adj2_y, w)])) {
+				if (collide(m[v2_idx(adj1_x, adj1_y, w)], block_mask) || collide(m[v2_idx(adj2_x, adj2_y, w)], block_mask)) {
 					continue;
 				}
 			}

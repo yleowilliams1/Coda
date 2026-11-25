@@ -8,3 +8,6 @@ struct Gild_AstarPath{
 };
 
 bool gild_pathfind(u8 *m, u32 w, u32 h,gild_v2_u32 start, gild_v2_u32 target,struct Gild_AstarPath *out);
+// Same, but a tile blocks if any bit in block_mask is set (gild_pathfind uses 1).
+// The start tile is never checked, so a character can path away from its own tile.
+bool gild_pathfind_mask(u8 *m, u32 w, u32 h, gild_v2_u32 start, gild_v2_u32 target, u8 block_mask, struct Gild_AstarPath *out);

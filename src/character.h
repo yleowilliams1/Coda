@@ -88,6 +88,8 @@ enum EntityFlags {
 	#undef X
 };
 enum Direction{ DIR_NE, DIR_SE, DIR_SW, DIR_NW } ;
+#define CHARACTER_UID_NONE 0
+#define PLAYER_UID 1
 struct CharacterInstance{
 	u32 unique_id;
 	u32 save_counter;
@@ -118,9 +120,19 @@ struct CharacterInstance{
 	struct Gild_AstarPath path;
 	u32 path_cursor;
 	float step_progress; // how far into the current step, in tiles
+	bool stepping;       // between tiles: step_to is reserved on the map as well as tile_x/y
+	gild_v2_u32 step_to;
+	float blocked_time;  // seconds the next tile has been blocked
+	float next_repath;   // blocked_time at which to look for a way round again
 };
 struct Map;
 
+// Marks the character's tile as occupied. Call when it's put on the map (after
+// instancing or loading). False if its tile is off the map.
+bool character_place(struct Map *map, struct CharacterInstance *c);
+// Frees every tile it holds and stops it. Call before taking it off the map
+// (changing maps, teleporting, deleting, or dying if bodies shouldn't block).
+void character_unplace(struct Map *map, struct CharacterInstance *c);
 void update_movement(struct Map *map, struct CharacterInstance *c, float dt);
 void stop_movement(struct CharacterInstance *c);
 bool is_moving(struct CharacterInstance *c);

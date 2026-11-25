@@ -51,6 +51,7 @@ add_executable(app
 	src/main.c
 	src/proto.c
 	src/save.c
+	src/save_version.c
 )
 
 target_include_directories(app PRIVATE
